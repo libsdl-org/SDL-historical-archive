@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -58,12 +58,6 @@ SDL_DYNAPI_PROC(SDL_Thread*,SDL_CreateThread,(SDL_ThreadFunction a, const char *
 SDL_DYNAPI_PROC(SDL_RWops*,SDL_RWFromFP,(FILE *a, SDL_bool b),(a,b),return)
 #else
 SDL_DYNAPI_PROC(SDL_RWops*,SDL_RWFromFP,(void *a, SDL_bool b),(a,b),return)
-#endif
-
-/* so annoying. */
-#if defined(__thumb__) && (defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6T2__) || defined(__ARM_ARCH_6Z__) || defined(__ARM_ARCH_6ZK__))
-SDL_DYNAPI_PROC(void,SDL_MemoryBarrierRelease,(void),(),)
-SDL_DYNAPI_PROC(void,SDL_MemoryBarrierAcquire,(void),(),)
 #endif
 
 #ifdef __WIN32__
@@ -612,7 +606,7 @@ SDL_DYNAPI_PROC(int,SDL_WinRTRunApp,(int a, char **b, void *c),(a,b,c),return)
 SDL_DYNAPI_PROC(const wchar_t*,SDL_WinRTGetFSPathUNICODE,(SDL_WinRT_Path a),(a),return)
 SDL_DYNAPI_PROC(const char*,SDL_WinRTGetFSPathUTF8,(SDL_WinRT_Path a),(a),return)
 #endif
-SDL_DYNAPI_PROC(void,SDL_WarpMouseGlobal,(int a, int b),(a,b),)
+SDL_DYNAPI_PROC(int,SDL_WarpMouseGlobal,(int a, int b),(a,b),return)
 SDL_DYNAPI_PROC(float,SDL_sqrtf,(float a),(a),return)
 SDL_DYNAPI_PROC(double,SDL_tan,(double a),(a),return)
 SDL_DYNAPI_PROC(float,SDL_tanf,(float a),(a),return)
@@ -627,3 +621,39 @@ SDL_DYNAPI_PROC(SDL_Window*,SDL_GetGrabbedWindow,(void),(),return)
 #ifdef __WIN32__
 SDL_DYNAPI_PROC(void,SDL_SetWindowsMessageHook,(SDL_WindowsMessageHook a, void *b),(a,b),)
 #endif
+SDL_DYNAPI_PROC(int,SDL_GetDisplayDPI,(int a, float *b, float *c, float *d),(a,b,c,d),return)
+SDL_DYNAPI_PROC(SDL_JoystickPowerLevel,SDL_JoystickCurrentPowerLevel,(SDL_Joystick *a),(a),return)
+SDL_DYNAPI_PROC(SDL_GameController*,SDL_GameControllerFromInstanceID,(SDL_JoystickID a),(a),return)
+SDL_DYNAPI_PROC(SDL_Joystick*,SDL_JoystickFromInstanceID,(SDL_JoystickID a),(a),return)
+SDL_DYNAPI_PROC(int,SDL_GetDisplayUsableBounds,(int a, SDL_Rect *b),(a,b),return)
+SDL_DYNAPI_PROC(int,SDL_GetWindowBordersSize,(SDL_Window *a, int *b, int *c, int *d, int *e),(a,b,c,d,e),return)
+SDL_DYNAPI_PROC(int,SDL_SetWindowOpacity,(SDL_Window *a, float b),(a,b),return)
+SDL_DYNAPI_PROC(int,SDL_GetWindowOpacity,(SDL_Window *a, float *b),(a,b),return)
+SDL_DYNAPI_PROC(int,SDL_SetWindowInputFocus,(SDL_Window *a),(a),return)
+SDL_DYNAPI_PROC(int,SDL_SetWindowModalFor,(SDL_Window *a, SDL_Window *b),(a,b),return)
+SDL_DYNAPI_PROC(int,SDL_RenderSetIntegerScale,(SDL_Renderer *a, SDL_bool b),(a,b),return)
+SDL_DYNAPI_PROC(SDL_bool,SDL_RenderGetIntegerScale,(SDL_Renderer *a),(a),return)
+SDL_DYNAPI_PROC(Uint32,SDL_DequeueAudio,(SDL_AudioDeviceID a, void *b, Uint32 c),(a,b,c),return)
+SDL_DYNAPI_PROC(void,SDL_SetWindowResizable,(SDL_Window *a, SDL_bool b),(a,b),)
+SDL_DYNAPI_PROC(SDL_Surface*,SDL_CreateRGBSurfaceWithFormat,(Uint32 a, int b, int c, int d, Uint32 e),(a,b,c,d,e),return)
+SDL_DYNAPI_PROC(SDL_Surface*,SDL_CreateRGBSurfaceWithFormatFrom,(void *a, int b, int c, int d, int e, Uint32 f),(a,b,c,d,e,f),return)
+SDL_DYNAPI_PROC(SDL_bool,SDL_GetHintBoolean,(const char *a, SDL_bool b),(a,b),return)
+SDL_DYNAPI_PROC(Uint16,SDL_JoystickGetDeviceVendor,(int a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_JoystickGetDeviceProduct,(int a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_JoystickGetDeviceProductVersion,(int a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_JoystickGetVendor,(SDL_Joystick *a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_JoystickGetProduct,(SDL_Joystick *a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_JoystickGetProductVersion,(SDL_Joystick *a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_GameControllerGetVendor,(SDL_GameController *a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_GameControllerGetProduct,(SDL_GameController *a),(a),return)
+SDL_DYNAPI_PROC(Uint16,SDL_GameControllerGetProductVersion,(SDL_GameController *a),(a),return)
+SDL_DYNAPI_PROC(SDL_bool,SDL_HasNEON,(void),(),return)
+SDL_DYNAPI_PROC(int,SDL_GameControllerNumMappings,(void),(),return)
+SDL_DYNAPI_PROC(char*,SDL_GameControllerMappingForIndex,(int a),(a),return)
+SDL_DYNAPI_PROC(SDL_bool,SDL_JoystickGetAxisInitialState,(SDL_Joystick *a, int b, Sint16 *c),(a,b,c),return)
+SDL_DYNAPI_PROC(SDL_JoystickType,SDL_JoystickGetDeviceType,(int a),(a),return)
+SDL_DYNAPI_PROC(SDL_JoystickType,SDL_JoystickGetType,(SDL_Joystick *a),(a),return)
+SDL_DYNAPI_PROC(void,SDL_MemoryBarrierReleaseFunction,(void),(),)
+SDL_DYNAPI_PROC(void,SDL_MemoryBarrierAcquireFunction,(void),(),)
+SDL_DYNAPI_PROC(SDL_JoystickID,SDL_JoystickGetDeviceInstanceID,(int a),(a),return)
+SDL_DYNAPI_PROC(size_t,SDL_utf8strlen,(const char *a),(a),return)

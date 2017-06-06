@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -25,12 +25,11 @@
 #include <signal.h>
 #endif
 
-struct
+static struct
 {
     SDL_AudioSpec spec;
     Uint8 *sound;               /* Pointer to wave data */
     Uint32 soundlen;            /* Length of wave data */
-    int soundpos;               /* Current play position */
 } wave;
 
 
@@ -77,8 +76,8 @@ main(int argc, char *argv[])
 {
     char filename[4096];
 
-	/* Enable standard application logging */
-	SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
+    /* Enable standard application logging */
+    SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     /* Load the SDL library */
     if (SDL_Init(SDL_INIT_AUDIO) < 0) {

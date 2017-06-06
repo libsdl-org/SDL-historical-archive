@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -33,9 +33,21 @@
 #include "SDL_uikitvideo.h"
 #include "SDL_uikitmodes.h"
 #include "SDL_uikitwindow.h"
+#include "SDL_uikitopengles.h"
 
 #if SDL_IPHONE_KEYBOARD
 #include "keyinfotable.h"
+#endif
+
+#if TARGET_OS_TV
+static void
+SDL_AppleTVControllerUIHintChanged(void *userdata, const char *name, const char *oldValue, const char *hint)
+{
+    @autoreleasepool {
+        SDL_uikitviewcontroller *viewcontroller = (__bridge SDL_uikitviewcontroller *) userdata;
+        viewcontroller.controllerUserInteractionEnabled = hint && (*hint != '0');
+    }
+}
 #endif
 
 @implementation SDL_uikitviewcontroller {
@@ -46,6 +58,7 @@
 
 #if SDL_IPHONE_KEYBOARD
     UITextField *textField;
+    BOOL rotatingOrientation;
 #endif
 }
 
@@ -58,6 +71,13 @@
 
 #if SDL_IPHONE_KEYBOARD
         [self initKeyboard];
+        rotatingOrientation = FALSE;
+#endif
+
+#if TARGET_OS_TV
+        SDL_AddHintCallback(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS,
+                            SDL_AppleTVControllerUIHintChanged,
+                            (__bridge void *) self);
 #endif
     }
     return self;
@@ -67,6 +87,12 @@
 {
 #if SDL_IPHONE_KEYBOARD
     [self deinitKeyboard];
+#endif
+
+#if TARGET_OS_TV
+    SDL_DelHintCallback(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS,
+                        SDL_AppleTVControllerUIHintChanged,
+                        (__bridge void *) self);
 #endif
 }
 
@@ -102,6 +128,9 @@
 {
     /* Don't run the game loop while a messagebox is up */
     if (!UIKit_ShowingMessageBox()) {
+        /* See the comment in the function definition. */
+        UIKit_GL_RestoreCurrentContext();
+
         animationCallback(animationCallbackParam);
     }
 }
@@ -120,6 +149,7 @@
     SDL_SendWindowEvent(window, SDL_WINDOWEVENT_RESIZED, w, h);
 }
 
+#if !TARGET_OS_TV
 - (NSUInteger)supportedInterfaceOrientations
 {
     return UIKit_GetSupportedOrientations(window);
@@ -134,12 +164,7 @@
 {
     return (window->flags & (SDL_WINDOW_FULLSCREEN|SDL_WINDOW_BORDERLESS)) != 0;
 }
-
-- (UIStatusBarStyle)preferredStatusBarStyle
-{
-    /* We assume most SDL apps don't have a bright white background. */
-    return UIStatusBarStyleLightContent;
-}
+#endif
 
 /*
  ---- Keyboard related functionality below this line ----
@@ -170,9 +195,11 @@
     textField.hidden = YES;
     keyboardVisible = NO;
 
+#if !TARGET_OS_TV
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center addObserver:self selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification object:nil];
     [center addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+#endif
 }
 
 - (void)setView:(UIView *)view
@@ -186,11 +213,36 @@
     }
 }
 
+/* willRotateToInterfaceOrientation and didRotateFromInterfaceOrientation are deprecated in iOS 8+ in favor of viewWillTransitionToSize */
+#if TARGET_OS_TV || __IPHONE_OS_VERSION_MIN_REQUIRED >= 80000
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
+{
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    rotatingOrientation = TRUE;
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {}
+                                 completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+                                     rotatingOrientation = FALSE;
+                                 }];
+}
+#else
+- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration {
+    [super willRotateToInterfaceOrientation:toInterfaceOrientation duration:duration];
+    rotatingOrientation = TRUE;
+}
+
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation {
+    [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
+    rotatingOrientation = FALSE;
+}
+#endif /* TARGET_OS_TV || __IPHONE_OS_VERSION_MIN_REQUIRED >= 80000 */
+
 - (void)deinitKeyboard
 {
+#if !TARGET_OS_TV
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center removeObserver:self name:UIKeyboardWillShowNotification object:nil];
     [center removeObserver:self name:UIKeyboardWillHideNotification object:nil];
+#endif
 }
 
 /* reveal onscreen virtual keyboard */
@@ -211,6 +263,7 @@
 
 - (void)keyboardWillShow:(NSNotification *)notification
 {
+#if !TARGET_OS_TV
     CGRect kbrect = [[notification userInfo][UIKeyboardFrameBeginUserInfoKey] CGRectValue];
 
     /* The keyboard rect is in the coordinate space of the screen/window, but we
@@ -218,10 +271,13 @@
     kbrect = [self.view convertRect:kbrect fromView:nil];
 
     [self setKeyboardHeight:(int)kbrect.size.height];
+#endif
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification
 {
+    if (!rotatingOrientation)
+        SDL_StopTextInput();
     [self setKeyboardHeight:0];
 }
 

@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -50,6 +50,7 @@ quit(int rc)
 void
 loop()
 {
+    int i;
     SDL_Event event;
         /* Check for events */
         while (SDL_PollEvent(&event)) {
@@ -100,6 +101,12 @@ loop()
                 }
             }
         }
+
+        for (i = 0; i < state->num_windows; ++i) {
+            SDL_Renderer *renderer = state->renderers[i];
+            SDL_RenderClear(renderer);
+            SDL_RenderPresent(renderer);
+        }
 #ifdef __EMSCRIPTEN__
     if (done) {
         emscripten_cancel_main_loop();
@@ -112,7 +119,7 @@ main(int argc, char *argv[])
 {
     int i;
 
-	/* Enable standard application logging */
+    /* Enable standard application logging */
     SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     SDL_assert(SDL_arraysize(cursorNames) == SDL_NUM_SYSTEM_CURSORS);
@@ -122,7 +129,6 @@ main(int argc, char *argv[])
     if (!state) {
         return 1;
     }
-    state->skip_renderer = SDL_TRUE;
     for (i = 1; i < argc;) {
         int consumed;
 
@@ -140,6 +146,12 @@ main(int argc, char *argv[])
         quit(2);
     }
 
+    for (i = 0; i < state->num_windows; ++i) {
+        SDL_Renderer *renderer = state->renderers[i];
+        SDL_SetRenderDrawColor(renderer, 0xA0, 0xA0, 0xA0, 0xFF);
+        SDL_RenderClear(renderer);
+    }
+ 
     /* Main render loop */
     done = 0;
 #ifdef __EMSCRIPTEN__

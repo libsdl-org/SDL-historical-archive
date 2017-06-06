@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -239,12 +239,14 @@ WatchJoystick(SDL_Joystick * joystick)
 int
 main(int argc, char *argv[])
 {
-    const char *name;
+    const char *name, *type;
     int i;
     SDL_Joystick *joystick;
 
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+
     /* Enable standard application logging */
-    SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);	
+    SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     /* Initialize SDL (Note: video is required to start event loop) */
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) {
@@ -263,19 +265,54 @@ main(int argc, char *argv[])
                     SDL_GetError());
         } else {
             char guid[64];
+            SDL_assert(SDL_JoystickFromInstanceID(SDL_JoystickInstanceID(joystick)) == joystick);
             SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(joystick),
                                       guid, sizeof (guid));
+            switch (SDL_JoystickGetType(joystick)) {
+            case SDL_JOYSTICK_TYPE_GAMECONTROLLER:
+                type = "Game Controller";
+                break;
+            case SDL_JOYSTICK_TYPE_WHEEL:
+                type = "Wheel";
+                break;
+            case SDL_JOYSTICK_TYPE_ARCADE_STICK:
+                type = "Arcade Stick";
+                break;
+            case SDL_JOYSTICK_TYPE_FLIGHT_STICK:
+                type = "Flight Stick";
+                break;
+            case SDL_JOYSTICK_TYPE_DANCE_PAD:
+                type = "Dance Pad";
+                break;
+            case SDL_JOYSTICK_TYPE_GUITAR:
+                type = "Guitar";
+                break;
+            case SDL_JOYSTICK_TYPE_DRUM_KIT:
+                type = "Drum Kit";
+                break;
+            case SDL_JOYSTICK_TYPE_ARCADE_PAD:
+                type = "Arcade Pad";
+                break;
+            case SDL_JOYSTICK_TYPE_THROTTLE:
+                type = "Throttle";
+                break;
+            default:
+                type = "Unknown";
+                break;
+            }
+            SDL_Log("       type: %s\n", type);
             SDL_Log("       axes: %d\n", SDL_JoystickNumAxes(joystick));
             SDL_Log("      balls: %d\n", SDL_JoystickNumBalls(joystick));
             SDL_Log("       hats: %d\n", SDL_JoystickNumHats(joystick));
             SDL_Log("    buttons: %d\n", SDL_JoystickNumButtons(joystick));
             SDL_Log("instance id: %d\n", SDL_JoystickInstanceID(joystick));
             SDL_Log("       guid: %s\n", guid);
+            SDL_Log("    VID/PID: 0x%.4x/0x%.4x\n", SDL_JoystickGetVendor(joystick), SDL_JoystickGetProduct(joystick));
             SDL_JoystickClose(joystick);
         }
     }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__IPHONEOS__)
     if (SDL_NumJoysticks() > 0) {
 #else
     if (argv[1]) {
@@ -284,12 +321,15 @@ main(int argc, char *argv[])
         SDL_bool keepGoing = SDL_TRUE;
         SDL_Event event;
         int device;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__IPHONEOS__)
         device = 0;
 #else
         device = atoi(argv[1]);
 #endif
         joystick = SDL_JoystickOpen(device);
+        if (joystick != NULL) {
+            SDL_assert(SDL_JoystickFromInstanceID(SDL_JoystickInstanceID(joystick)) == joystick);
+        }
 
         while ( keepGoing ) {
             if (joystick == NULL) {
@@ -314,7 +354,11 @@ main(int argc, char *argv[])
                     || (event.type == SDL_MOUSEBUTTONDOWN)) {
                     keepGoing = SDL_FALSE;
                 } else if (event.type == SDL_JOYDEVICEADDED) {
+                    device = event.jdevice.which;
                     joystick = SDL_JoystickOpen(device);
+                    if (joystick != NULL) {
+                        SDL_assert(SDL_JoystickFromInstanceID(SDL_JoystickInstanceID(joystick)) == joystick);
+                    }
                     break;
                 }
             }
@@ -335,3 +379,5 @@ main(int argc, char *argv[])
 }
 
 #endif
+
+/* vi: set ts=4 sw=4 expandtab: */

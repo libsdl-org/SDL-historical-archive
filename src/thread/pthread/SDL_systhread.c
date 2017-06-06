@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -45,7 +45,6 @@
 
 #include "SDL_platform.h"
 #include "SDL_thread.h"
-#include "SDL_hints.h"
 #include "../SDL_thread_c.h"
 #include "../SDL_systhread.h"
 #ifdef __ANDROID__
@@ -53,7 +52,7 @@
 #endif
 
 #ifdef __HAIKU__
-#include <be/kernel/OS.h>
+#include <kernel/OS.h>
 #endif
 
 #include "SDL_assert.h"
@@ -87,8 +86,6 @@ int
 SDL_SYS_CreateThread(SDL_Thread * thread, void *args)
 {
     pthread_attr_t type;
-    size_t ss;
-    const char *hint = SDL_GetHint(SDL_HINT_THREAD_STACK_SIZE);
 
     /* do this here before any threads exist, so there's no race condition. */
     #if defined(__MACOSX__) || defined(__IPHONEOS__) || defined(__LINUX__)
@@ -109,15 +106,10 @@ SDL_SYS_CreateThread(SDL_Thread * thread, void *args)
     }
     pthread_attr_setdetachstate(&type, PTHREAD_CREATE_JOINABLE);
     
-    /* If the SDL_HINT_THREAD_STACK_SIZE exists and it seems to be a positive number, use it */
-    if (hint && hint[0] >= '0' && hint[0] <= '9') {
-        const size_t stacksize = (size_t) SDL_atoi(hint);
-        if (stacksize > 0) {
-            pthread_attr_setstacksize(&type, stacksize);
-        }
+    /* Set caller-requested stack size. Otherwise: use the system default. */
+    if (thread->stacksize) {
+        pthread_attr_setstacksize(&type, (size_t) thread->stacksize);
     }
-    
-    pthread_attr_getstacksize(&type, &ss);
 
     /* Create the thread and go! */
     if (pthread_create(&thread->handle, &type, RunThread, args) != 0) {
@@ -130,10 +122,10 @@ SDL_SYS_CreateThread(SDL_Thread * thread, void *args)
 void
 SDL_SYS_SetupThread(const char *name)
 {
-#if !defined(__ANDROID__) && !defined(__NACL__)
+#if !defined(__NACL__)
     int i;
     sigset_t mask;
-#endif /* !__ANDROID__ && !__NACL__ */
+#endif /* !__NACL__ */
 
     if (name != NULL) {
         #if defined(__MACOSX__) || defined(__IPHONEOS__) || defined(__LINUX__)
@@ -146,7 +138,11 @@ SDL_SYS_SetupThread(const char *name)
             #endif
         }
         #elif HAVE_PTHREAD_SETNAME_NP
+            #if defined(__NETBSD__)
+            pthread_setname_np(pthread_self(), "%s", name);
+            #else
             pthread_setname_np(pthread_self(), name);
+            #endif
         #elif HAVE_PTHREAD_SET_NAME_NP
             pthread_set_name_np(pthread_self(), name);
         #elif defined(__HAIKU__)
@@ -159,14 +155,14 @@ SDL_SYS_SetupThread(const char *name)
     }
 
    /* NativeClient does not yet support signals.*/
-#if !defined(__ANDROID__) && !defined(__NACL__)
+#if !defined(__NACL__)
     /* Mask asynchronous signals for this thread */
     sigemptyset(&mask);
     for (i = 0; sig_list[i]; ++i) {
         sigaddset(&mask, sig_list[i]);
     }
     pthread_sigmask(SIG_BLOCK, &mask, 0);
-#endif /* !__ANDROID__ && !__NACL__ */
+#endif /* !__NACL__ */
 
 
 #ifdef PTHREAD_CANCEL_ASYNCHRONOUS
@@ -203,6 +199,10 @@ SDL_SYS_SetThreadPriority(SDL_ThreadPriority priority)
     if (setpriority(PRIO_PROCESS, syscall(SYS_gettid), value) < 0) {
         /* Note that this fails if you're trying to set high priority
            and you don't have root permission. BUT DON'T RUN AS ROOT!
+
+           You can grant the ability to increase thread priority by
+           running the following command on your application binary:
+               sudo setcap 'cap_sys_nice=eip' <application>
          */
         return SDL_SetError("setpriority() failed");
     }

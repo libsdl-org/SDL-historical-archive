@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -32,6 +32,7 @@
 #include "../../events/SDL_touch_c.h"
 #include "../../events/scancodes_windows.h"
 #include "SDL_assert.h"
+#include "SDL_hints.h"
 
 /* Dropfile support */
 #include <shellapi.h>
@@ -197,13 +198,26 @@ WindowsScanCodeToSDLScanCode(LPARAM lParam, WPARAM wParam)
     return code;
 }
 
+static SDL_bool
+WIN_ShouldIgnoreFocusClick()
+{
+    return !SDL_GetHintBoolean(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, SDL_FALSE);
+}
 
-void
+static void
 WIN_CheckWParamMouseButton(SDL_bool bwParamMousePressed, SDL_bool bSDLMousePressed, SDL_WindowData *data, Uint8 button, SDL_MouseID mouseID)
 {
-    if (data->focus_click_pending && button == SDL_BUTTON_LEFT && !bwParamMousePressed) {
-        data->focus_click_pending = SDL_FALSE;
-        WIN_UpdateClipCursor(data->window);
+    if (data->focus_click_pending & SDL_BUTTON(button)) {
+        /* Ignore the button click for activation */
+        if (!bwParamMousePressed) {
+            data->focus_click_pending &= ~SDL_BUTTON(button);
+            if (!data->focus_click_pending) {
+                WIN_UpdateClipCursor(data->window);
+            }
+        }
+        if (WIN_ShouldIgnoreFocusClick()) {
+            return;
+        }
     }
 
     if (bwParamMousePressed && !bSDLMousePressed) {
@@ -217,7 +231,7 @@ WIN_CheckWParamMouseButton(SDL_bool bwParamMousePressed, SDL_bool bSDLMousePress
 * Some windows systems fail to send a WM_LBUTTONDOWN sometimes, but each mouse move contains the current button state also
 *  so this funciton reconciles our view of the world with the current buttons reported by windows
 */
-void
+static void
 WIN_CheckWParamMouseButtons(WPARAM wParam, SDL_WindowData *data, SDL_MouseID mouseID)
 {
     if (wParam != data->mouse_button_flags) {
@@ -232,7 +246,7 @@ WIN_CheckWParamMouseButtons(WPARAM wParam, SDL_WindowData *data, SDL_MouseID mou
 }
 
 
-void
+static void
 WIN_CheckRawMouseButtons(ULONG rawButtons, SDL_WindowData *data)
 {
     if (rawButtons != data->mouse_button_flags) {
@@ -261,7 +275,7 @@ WIN_CheckRawMouseButtons(ULONG rawButtons, SDL_WindowData *data)
     }
 }
 
-void
+static void
 WIN_CheckAsyncMouseRelease(SDL_WindowData *data)
 {
     Uint32 mouseFlags;
@@ -295,7 +309,7 @@ WIN_CheckAsyncMouseRelease(SDL_WindowData *data)
     data->mouse_button_flags = 0;
 }
 
-SDL_FORCE_INLINE BOOL
+static BOOL
 WIN_ConvertUTF32toUTF8(UINT32 codepoint, char * text)
 {
     if (codepoint <= 0x7F) {
@@ -320,6 +334,12 @@ WIN_ConvertUTF32toUTF8(UINT32 codepoint, char * text)
         return SDL_FALSE;
     }
     return SDL_TRUE;
+}
+
+static SDL_bool
+ShouldGenerateWindowCloseOnAltF4(void)
+{
+    return !SDL_GetHintBoolean(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, SDL_FALSE);
 }
 
 LRESULT CALLBACK
@@ -381,8 +401,24 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             minimized = HIWORD(wParam);
             if (!minimized && (LOWORD(wParam) != WA_INACTIVE)) {
-                data->focus_click_pending = (GetAsyncKeyState(VK_LBUTTON) != 0);
-
+                if (LOWORD(wParam) == WA_CLICKACTIVE) {
+                    if (GetAsyncKeyState(VK_LBUTTON)) {
+                        data->focus_click_pending |= SDL_BUTTON_LMASK;
+                    }
+                    if (GetAsyncKeyState(VK_RBUTTON)) {
+                        data->focus_click_pending |= SDL_BUTTON_RMASK;
+                    }
+                    if (GetAsyncKeyState(VK_MBUTTON)) {
+                        data->focus_click_pending |= SDL_BUTTON_MMASK;
+                    }
+                    if (GetAsyncKeyState(VK_XBUTTON1)) {
+                        data->focus_click_pending |= SDL_BUTTON_X1MASK;
+                    }
+                    if (GetAsyncKeyState(VK_XBUTTON2)) {
+                        data->focus_click_pending |= SDL_BUTTON_X2MASK;
+                    }
+                }
+                
                 SDL_SendWindowEvent(data->window, SDL_WINDOWEVENT_SHOWN, 0, 0);
                 if (SDL_GetKeyboardFocus() != data->window) {
                     SDL_SetKeyboardFocus(data->window);
@@ -398,12 +434,20 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                  * FIXME: Update keyboard state
                  */
                 WIN_CheckClipboardUpdate(data->videodata);
+
+                SDL_ToggleModState(KMOD_CAPS, (GetKeyState(VK_CAPITAL) & 0x0001) != 0);
+                SDL_ToggleModState(KMOD_NUM, (GetKeyState(VK_NUMLOCK) & 0x0001) != 0);
             } else {
+                data->in_window_deactivation = SDL_TRUE;
+
                 if (SDL_GetKeyboardFocus() == data->window) {
                     SDL_SetKeyboardFocus(NULL);
+                    WIN_ResetDeadKeys();
                 }
 
                 ClipCursor(NULL);
+
+                data->in_window_deactivation = SDL_FALSE;
             }
         }
         returnCode = 0;
@@ -471,7 +515,7 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                             initialMousePoint.y = rawmouse->lLastY;
                         }
 
-                        SDL_SendMouseMotion(data->window, 0, 1, (int)(rawmouse->lLastX-initialMousePoint.x), (int)(rawmouse->lLastY-initialMousePoint.y) );
+                        SDL_SendMouseMotion(data->window, 0, 1, (int)(rawmouse->lLastX-initialMousePoint.x), (int)(rawmouse->lLastY-initialMousePoint.y));
 
                         initialMousePoint.x = rawmouse->lLastX;
                         initialMousePoint.y = rawmouse->lLastY;
@@ -480,10 +524,17 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 } else if (isCapture) {
                     /* we check for where Windows thinks the system cursor lives in this case, so we don't really lose mouse accel, etc. */
                     POINT pt;
+                    RECT hwndRect;
+                    HWND currentHnd;
+
                     GetCursorPos(&pt);
-                    if (WindowFromPoint(pt) != hwnd) {  /* if in the window, WM_MOUSEMOVE, etc, will cover it. */
-                        ScreenToClient(hwnd, &pt);
-                        SDL_SendMouseMotion(data->window, 0, 0, (int) pt.x, (int) pt.y);
+                    currentHnd = WindowFromPoint(pt);
+                    ScreenToClient(hwnd, &pt);
+                    GetClientRect(hwnd, &hwndRect);
+
+                    /* if in the window, WM_MOUSEMOVE, etc, will cover it. */
+                    if(currentHnd != hwnd || pt.x < 0 || pt.y < 0 || pt.x > hwndRect.right || pt.y > hwndRect.right) {
+                        SDL_SendMouseMotion(data->window, 0, 0, (int)pt.x, (int)pt.y);
                         SDL_SendMouseButton(data->window, 0, GetAsyncKeyState(VK_LBUTTON) & 0x8000 ? SDL_PRESSED : SDL_RELEASED, SDL_BUTTON_LEFT);
                         SDL_SendMouseButton(data->window, 0, GetAsyncKeyState(VK_RBUTTON) & 0x8000 ? SDL_PRESSED : SDL_RELEASED, SDL_BUTTON_RIGHT);
                         SDL_SendMouseButton(data->window, 0, GetAsyncKeyState(VK_MBUTTON) & 0x8000 ? SDL_PRESSED : SDL_RELEASED, SDL_BUTTON_MIDDLE);
@@ -559,7 +610,7 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             /* Detect relevant keyboard shortcuts */
             if (keyboardState[SDL_SCANCODE_LALT] == SDL_PRESSED || keyboardState[SDL_SCANCODE_RALT] == SDL_PRESSED) {
                 /* ALT+F4: Close window */
-                if (code == SDL_SCANCODE_F4) {
+                if (code == SDL_SCANCODE_F4 && ShouldGenerateWindowCloseOnAltF4()) {
                     SDL_SendWindowEvent(data->window, SDL_WINDOWEVENT_CLOSE, 0, 0);
                 }
             }
@@ -568,21 +619,7 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 SDL_SendKeyboardKey(SDL_PRESSED, code);
             }
         }
-        if (msg == WM_KEYDOWN) {
-            BYTE keyboardState[256];
-            char text[5];
-            UINT32 utf32 = 0;
-
-            GetKeyboardState(keyboardState);
-            if (ToUnicode(wParam, (lParam >> 16) & 0xff, keyboardState, (LPWSTR)&utf32, 1, 0) > 0) {
-                if (WIN_ConvertUTF32toUTF8(utf32, text)) {
-                    WORD repetition;
-                    for (repetition = lParam & 0xffff; repetition > 0; repetition--) {
-                        SDL_SendKeyboardText(text);
-                    }
-                }
-            }
-        }
+ 
         returnCode = 0;
         break;
 
@@ -604,8 +641,18 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_UNICHAR:
+        if ( wParam == UNICODE_NOCHAR ) {
+            returnCode = 1;
+            break;
+        }
+        /* otherwise fall through to below */
     case WM_CHAR:
-        /* Ignore WM_CHAR messages that come from TranslateMessage(), since we handle WM_KEY* messages directly */
+        {
+            char text[5];
+            if ( WIN_ConvertUTF32toUTF8( (UINT32)wParam, text ) ) {
+                SDL_SendKeyboardText( text );
+            }
+        }
         returnCode = 0;
         break;
 
@@ -613,6 +660,7 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_INPUTLANGCHANGE:
         {
             WIN_UpdateKeymap();
+            SDL_SendKeymapChangedEvent();
         }
         returnCode = 1;
         break;
@@ -716,13 +764,20 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         break;
 #endif /* WM_GETMINMAXINFO */
 
+    case WM_WINDOWPOSCHANGING:
+
+        if (data->expected_resize) {
+            returnCode = 0;
+        }
+        break;
+
     case WM_WINDOWPOSCHANGED:
         {
             RECT rect;
             int x, y;
             int w, h;
             
-            if (data->in_border_change) {
+            if (data->initializing || data->in_border_change) {
                 break;
             }
 
@@ -742,6 +797,9 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             h = rect.bottom - rect.top;
             SDL_SendWindowEvent(data->window, SDL_WINDOWEVENT_RESIZED, w,
                                 h);
+
+            /* Forces a WM_PAINT event */
+            InvalidateRect(hwnd, NULL, FALSE);
         }
         break;
 
@@ -749,6 +807,8 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             switch (wParam) {
             case SIZE_MAXIMIZED:
+                SDL_SendWindowEvent(data->window,
+                    SDL_WINDOWEVENT_RESTORED, 0, 0);
                 SDL_SendWindowEvent(data->window,
                     SDL_WINDOWEVENT_MAXIMIZED, 0, 0);
                 break;
@@ -800,9 +860,9 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case WM_SYSCOMMAND:
         {
-			if ((wParam & 0xFFF0) == SC_KEYMENU) {
-				return (0);
-			}
+            if ((wParam & 0xFFF0) == SC_KEYMENU) {
+                return (0);
+            }
 
 #if defined(SC_SCREENSAVE) || defined(SC_MONITORPOWER)
             /* Don't start the screensaver or blank the monitor in fullscreen apps */
@@ -886,12 +946,13 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 if (buffer) {
                     if (DragQueryFile(drop, i, buffer, size)) {
                         char *file = WIN_StringToUTF8(buffer);
-                        SDL_SendDropFile(file);
+                        SDL_SendDropFile(data->window, file);
                         SDL_free(file);
                     }
                     SDL_stack_free(buffer);
                 }
             }
+            SDL_SendDropComplete(data->window);
             DragFinish(drop);
             return 0;
         }
@@ -906,15 +967,17 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     const SDL_Point point = { (int) winpoint.x, (int) winpoint.y };
                     const SDL_HitTestResult rc = window->hit_test(window, &point, window->hit_test_data);
                     switch (rc) {
-                        case SDL_HITTEST_DRAGGABLE: return HTCAPTION;
-                        case SDL_HITTEST_RESIZE_TOPLEFT: return HTTOPLEFT;
-                        case SDL_HITTEST_RESIZE_TOP: return HTTOP;
-                        case SDL_HITTEST_RESIZE_TOPRIGHT: return HTTOPRIGHT;
-                        case SDL_HITTEST_RESIZE_RIGHT: return HTRIGHT;
-                        case SDL_HITTEST_RESIZE_BOTTOMRIGHT: return HTBOTTOMRIGHT;
-                        case SDL_HITTEST_RESIZE_BOTTOM: return HTBOTTOM;
-                        case SDL_HITTEST_RESIZE_BOTTOMLEFT: return HTBOTTOMLEFT;
-                        case SDL_HITTEST_RESIZE_LEFT: return HTLEFT;
+                        #define POST_HIT_TEST(ret) { SDL_SendWindowEvent(data->window, SDL_WINDOWEVENT_HIT_TEST, 0, 0); return ret; }
+                        case SDL_HITTEST_DRAGGABLE: POST_HIT_TEST(HTCAPTION);
+                        case SDL_HITTEST_RESIZE_TOPLEFT: POST_HIT_TEST(HTTOPLEFT);
+                        case SDL_HITTEST_RESIZE_TOP: POST_HIT_TEST(HTTOP);
+                        case SDL_HITTEST_RESIZE_TOPRIGHT: POST_HIT_TEST(HTTOPRIGHT);
+                        case SDL_HITTEST_RESIZE_RIGHT: POST_HIT_TEST(HTRIGHT);
+                        case SDL_HITTEST_RESIZE_BOTTOMRIGHT: POST_HIT_TEST(HTBOTTOMRIGHT);
+                        case SDL_HITTEST_RESIZE_BOTTOM: POST_HIT_TEST(HTBOTTOM);
+                        case SDL_HITTEST_RESIZE_BOTTOMLEFT: POST_HIT_TEST(HTBOTTOMLEFT);
+                        case SDL_HITTEST_RESIZE_LEFT: POST_HIT_TEST(HTLEFT);
+                        #undef POST_HIT_TEST
                         case SDL_HITTEST_NORMAL: return HTCLIENT;
                     }
                 }
@@ -991,7 +1054,8 @@ HINSTANCE SDL_Instance = NULL;
 int
 SDL_RegisterApp(char *name, Uint32 style, void *hInst)
 {
-    WNDCLASS class;
+    WNDCLASSEX wcex;
+    TCHAR path[MAX_PATH];
 
     /* Only do this once... */
     if (app_registered) {
@@ -1013,19 +1077,24 @@ SDL_RegisterApp(char *name, Uint32 style, void *hInst)
     }
 
     /* Register the application class */
-    class.hCursor = NULL;
-    class.hIcon =
-        LoadImage(SDL_Instance, SDL_Appname, IMAGE_ICON, 0, 0,
-                  LR_DEFAULTCOLOR);
-    class.lpszMenuName = NULL;
-    class.lpszClassName = SDL_Appname;
-    class.hbrBackground = NULL;
-    class.hInstance = SDL_Instance;
-    class.style = SDL_Appstyle;
-    class.lpfnWndProc = WIN_WindowProc;
-    class.cbWndExtra = 0;
-    class.cbClsExtra = 0;
-    if (!RegisterClass(&class)) {
+    wcex.cbSize         = sizeof(WNDCLASSEX);
+    wcex.hCursor        = NULL;
+    wcex.hIcon          = NULL;
+    wcex.hIconSm        = NULL;
+    wcex.lpszMenuName   = NULL;
+    wcex.lpszClassName  = SDL_Appname;
+    wcex.style          = SDL_Appstyle;
+    wcex.hbrBackground  = NULL;
+    wcex.lpfnWndProc    = WIN_WindowProc;
+    wcex.hInstance      = SDL_Instance;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+
+    /* Use the first icon as a default icon, like in the Explorer */
+    GetModuleFileName(SDL_Instance, path, MAX_PATH);
+    ExtractIconEx(path, 0, &wcex.hIcon, &wcex.hIconSm, 1);
+
+    if (!RegisterClassEx(&wcex)) {
         return SDL_SetError("Couldn't register application class");
     }
 
@@ -1037,7 +1106,7 @@ SDL_RegisterApp(char *name, Uint32 style, void *hInst)
 void
 SDL_UnregisterApp()
 {
-    WNDCLASS class;
+    WNDCLASSEX wcex;
 
     /* SDL_RegisterApp might not have been called before */
     if (!app_registered) {
@@ -1046,8 +1115,10 @@ SDL_UnregisterApp()
     --app_registered;
     if (app_registered == 0) {
         /* Check for any registered window classes. */
-        if (GetClassInfo(SDL_Instance, SDL_Appname, &class)) {
+        if (GetClassInfoEx(SDL_Instance, SDL_Appname, &wcex)) {
             UnregisterClass(SDL_Appname, SDL_Instance);
+            if (wcex.hIcon) DestroyIcon(wcex.hIcon);
+            if (wcex.hIconSm) DestroyIcon(wcex.hIconSm);
         }
         SDL_free(SDL_Appname);
         SDL_Appname = NULL;

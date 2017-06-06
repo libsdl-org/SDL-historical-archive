@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -60,7 +60,7 @@ int main(int argc,char** argv)
     SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     if(argc < 2) {
-		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Shape requires at least one bitmap file as argument.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Shape requires at least one bitmap file as argument.");
         exit(-1);
     }
 
@@ -71,13 +71,16 @@ int main(int argc,char** argv)
 
     num_pictures = argc - 1;
     pictures = (LoadedPicture *)SDL_malloc(sizeof(LoadedPicture)*num_pictures);
+    if (!pictures) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not allocate memory.");
+        exit(1);
+    }
     for(i=0;i<num_pictures;i++)
         pictures[i].surface = NULL;
     for(i=0;i<num_pictures;i++) {
         pictures[i].surface = SDL_LoadBMP(argv[i+1]);
         pictures[i].name = argv[i+1];
         if(pictures[i].surface == NULL) {
-            j = 0;
             for(j=0;j<num_pictures;j++)
                 SDL_FreeSurface(pictures[j].surface);
             SDL_free(pictures);
@@ -126,8 +129,7 @@ int main(int argc,char** argv)
     for(i=0;i<num_pictures;i++) {
         pictures[i].texture = SDL_CreateTextureFromSurface(renderer,pictures[i].surface);
         if(pictures[i].texture == NULL) {
-            j = 0;
-            for(j=0;j<num_pictures;i++)
+            for(i=0;i<num_pictures;i++)
                 if(pictures[i].texture != NULL)
                     SDL_DestroyTexture(pictures[i].texture);
             for(i=0;i<num_pictures;i++)

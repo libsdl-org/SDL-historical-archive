@@ -1,6 +1,6 @@
  /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -42,10 +42,31 @@
 - (instancetype)initWithFrame:(CGRect)frame
 {
     if ((self = [super initWithFrame:frame])) {
+        /* Apple TV Remote touchpad swipe gestures. */
+#if TARGET_OS_TV
+        UISwipeGestureRecognizer *swipeUp = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipeGesture:)];
+        swipeUp.direction = UISwipeGestureRecognizerDirectionUp;
+        [self addGestureRecognizer:swipeUp];
+
+        UISwipeGestureRecognizer *swipeDown = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipeGesture:)];
+        swipeDown.direction = UISwipeGestureRecognizerDirectionDown;
+        [self addGestureRecognizer:swipeDown];
+
+        UISwipeGestureRecognizer *swipeLeft = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipeGesture:)];
+        swipeLeft.direction = UISwipeGestureRecognizerDirectionLeft;
+        [self addGestureRecognizer:swipeLeft];
+
+        UISwipeGestureRecognizer *swipeRight = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipeGesture:)];
+        swipeRight.direction = UISwipeGestureRecognizerDirectionRight;
+        [self addGestureRecognizer:swipeRight];
+#endif
+
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         self.autoresizesSubviews = YES;
 
+#if !TARGET_OS_TV
         self.multipleTouchEnabled = YES;
+#endif
 
         touchId = 1;
         SDL_AddTouch(touchId, "");
@@ -123,39 +144,56 @@
     return point;
 }
 
+- (float)pressureForTouch:(UITouch *)touch
+{
+#ifdef __IPHONE_9_0
+    if ([touch respondsToSelector:@selector(force)]) {
+        return (float) touch.force;
+    }
+#endif
+
+    return 1.0f;
+}
+
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
 {
     for (UITouch *touch in touches) {
+        float pressure = [self pressureForTouch:touch];
+
         if (!firstFingerDown) {
             CGPoint locationInView = [self touchLocation:touch shouldNormalize:NO];
+            int clicks = (int) touch.tapCount;
 
             /* send mouse moved event */
             SDL_SendMouseMotion(sdlwindow, SDL_TOUCH_MOUSEID, 0, locationInView.x, locationInView.y);
 
             /* send mouse down event */
-            SDL_SendMouseButton(sdlwindow, SDL_TOUCH_MOUSEID, SDL_PRESSED, SDL_BUTTON_LEFT);
+            SDL_SendMouseButtonClicks(sdlwindow, SDL_TOUCH_MOUSEID, SDL_PRESSED, SDL_BUTTON_LEFT, clicks);
 
             firstFingerDown = touch;
         }
 
         CGPoint locationInView = [self touchLocation:touch shouldNormalize:YES];
         SDL_SendTouch(touchId, (SDL_FingerID)((size_t)touch),
-                      SDL_TRUE, locationInView.x, locationInView.y, 1.0f);
+                      SDL_TRUE, locationInView.x, locationInView.y, pressure);
     }
 }
 
 - (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
 {
     for (UITouch *touch in touches) {
+        float pressure = [self pressureForTouch:touch];
+
         if (touch == firstFingerDown) {
             /* send mouse up */
-            SDL_SendMouseButton(sdlwindow, SDL_TOUCH_MOUSEID, SDL_RELEASED, SDL_BUTTON_LEFT);
+            int clicks = (int) touch.tapCount;
+            SDL_SendMouseButtonClicks(sdlwindow, SDL_TOUCH_MOUSEID, SDL_RELEASED, SDL_BUTTON_LEFT, clicks);
             firstFingerDown = nil;
         }
 
         CGPoint locationInView = [self touchLocation:touch shouldNormalize:YES];
         SDL_SendTouch(touchId, (SDL_FingerID)((size_t)touch),
-                      SDL_FALSE, locationInView.x, locationInView.y, 1.0f);
+                      SDL_FALSE, locationInView.x, locationInView.y, pressure);
     }
 }
 
@@ -167,6 +205,8 @@
 - (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
 {
     for (UITouch *touch in touches) {
+        float pressure = [self pressureForTouch:touch];
+
         if (touch == firstFingerDown) {
             CGPoint locationInView = [self touchLocation:touch shouldNormalize:NO];
 
@@ -176,9 +216,101 @@
 
         CGPoint locationInView = [self touchLocation:touch shouldNormalize:YES];
         SDL_SendTouchMotion(touchId, (SDL_FingerID)((size_t)touch),
-                            locationInView.x, locationInView.y, 1.0f);
+                            locationInView.x, locationInView.y, pressure);
     }
 }
+
+#if TARGET_OS_TV || defined(__IPHONE_9_1)
+- (SDL_Scancode)scancodeFromPressType:(UIPressType)presstype
+{
+    switch (presstype) {
+    case UIPressTypeUpArrow:
+        return SDL_SCANCODE_UP;
+    case UIPressTypeDownArrow:
+        return SDL_SCANCODE_DOWN;
+    case UIPressTypeLeftArrow:
+        return SDL_SCANCODE_LEFT;
+    case UIPressTypeRightArrow:
+        return SDL_SCANCODE_RIGHT;
+    case UIPressTypeSelect:
+        /* HIG says: "primary button behavior" */
+        return SDL_SCANCODE_SELECT;
+    case UIPressTypeMenu:
+        /* HIG says: "returns to previous screen" */
+        return SDL_SCANCODE_MENU;
+    case UIPressTypePlayPause:
+        /* HIG says: "secondary button behavior" */
+        return SDL_SCANCODE_PAUSE;
+    default:
+        return SDL_SCANCODE_UNKNOWN;
+    }
+}
+
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+    for (UIPress *press in presses) {
+        SDL_Scancode scancode = [self scancodeFromPressType:press.type];
+        SDL_SendKeyboardKey(SDL_PRESSED, scancode);
+    }
+
+    [super pressesBegan:presses withEvent:event];
+}
+
+- (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+    for (UIPress *press in presses) {
+        SDL_Scancode scancode = [self scancodeFromPressType:press.type];
+        SDL_SendKeyboardKey(SDL_RELEASED, scancode);
+    }
+
+    [super pressesEnded:presses withEvent:event];
+}
+
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+    for (UIPress *press in presses) {
+        SDL_Scancode scancode = [self scancodeFromPressType:press.type];
+        SDL_SendKeyboardKey(SDL_RELEASED, scancode);
+    }
+
+    [super pressesCancelled:presses withEvent:event];
+}
+
+- (void)pressesChanged:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event
+{
+    /* This is only called when the force of a press changes. */
+    [super pressesChanged:presses withEvent:event];
+}
+#endif /* TARGET_OS_TV || defined(__IPHONE_9_1) */
+
+#if TARGET_OS_TV
+-(void)swipeGesture:(UISwipeGestureRecognizer *)gesture
+{
+    /* Swipe gestures don't trigger begin states. */
+    if (gesture.state == UIGestureRecognizerStateEnded) {
+        /* Send arrow key presses for now, as we don't have an external API
+         * which better maps to swipe gestures. */
+        switch (gesture.direction) {
+        case UISwipeGestureRecognizerDirectionUp:
+            SDL_SendKeyboardKey(SDL_PRESSED, SDL_SCANCODE_UP);
+            SDL_SendKeyboardKey(SDL_RELEASED, SDL_SCANCODE_UP);
+            break;
+        case UISwipeGestureRecognizerDirectionDown:
+            SDL_SendKeyboardKey(SDL_PRESSED, SDL_SCANCODE_DOWN);
+            SDL_SendKeyboardKey(SDL_RELEASED, SDL_SCANCODE_DOWN);
+            break;
+        case UISwipeGestureRecognizerDirectionLeft:
+            SDL_SendKeyboardKey(SDL_PRESSED, SDL_SCANCODE_LEFT);
+            SDL_SendKeyboardKey(SDL_RELEASED, SDL_SCANCODE_LEFT);
+            break;
+        case UISwipeGestureRecognizerDirectionRight:
+            SDL_SendKeyboardKey(SDL_PRESSED, SDL_SCANCODE_RIGHT);
+            SDL_SendKeyboardKey(SDL_RELEASED, SDL_SCANCODE_RIGHT);
+            break;
+        }
+    }
+}
+#endif /* TARGET_OS_TV */
 
 @end
 
