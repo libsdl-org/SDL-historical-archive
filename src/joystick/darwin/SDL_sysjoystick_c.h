@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -21,6 +21,7 @@
 #include "../../SDL_internal.h"
 
 #ifndef SDL_JOYSTICK_IOKIT_H
+#define SDL_JOYSTICK_IOKIT_H
 
 #include <IOKit/hid/IOHIDLib.h>
 
@@ -67,5 +68,6 @@ struct joystick_hwdata
 };
 typedef struct joystick_hwdata recDevice;
 
-
 #endif /* SDL_JOYSTICK_IOKIT_H */
+
+/* vi: set ts=4 sw=4 expandtab: */

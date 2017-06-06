@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -45,7 +45,7 @@ quit(int rc)
 }
 
 SDL_Texture *
-LoadTexture(SDL_Renderer *renderer, char *file, SDL_bool transparent)
+LoadTexture(SDL_Renderer *renderer, const char *file, SDL_bool transparent)
 {
     SDL_Surface *temp;
     SDL_Texture *texture;
@@ -126,7 +126,7 @@ Draw(DrawState *s)
     s->sprite_rect.x = (viewport.w - s->sprite_rect.w) / 2;
     s->sprite_rect.y = (viewport.h - s->sprite_rect.h) / 2;
 
-    SDL_RenderCopyEx(s->renderer, s->sprite, NULL, &s->sprite_rect, (double)s->sprite_rect.w, center, s->scale_direction);
+    SDL_RenderCopyEx(s->renderer, s->sprite, NULL, &s->sprite_rect, (double)s->sprite_rect.w, center, (SDL_RendererFlip)s->scale_direction);
 
     SDL_SetRenderTarget(s->renderer, NULL);
     SDL_RenderCopy(s->renderer, target, NULL, NULL);
@@ -166,7 +166,7 @@ main(int argc, char *argv[])
     int frames;
     Uint32 then, now;
 
-	/* Enable standard application logging */
+    /* Enable standard application logging */
     SDL_LogSetPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO);
 
     /* Initialize test framework */

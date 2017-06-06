@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -187,7 +187,7 @@ SDL_SYS_HapticInit(void)
 }
 
 int
-SDL_SYS_NumHaptics()
+SDL_SYS_NumHaptics(void)
 {
     return numhaptics;
 }
@@ -465,7 +465,7 @@ SDL_SYS_HapticOpen(SDL_Haptic * haptic)
     }
 
     /* Set the fname. */
-    haptic->hwdata->fname = item->fname;
+    haptic->hwdata->fname = SDL_strdup( item->fname );
     return 0;
 }
 
@@ -542,11 +542,12 @@ SDL_SYS_HapticOpenFromJoystick(SDL_Haptic * haptic, SDL_Joystick * joystick)
     /* Find the joystick in the haptic list. */
     for (item = SDL_hapticlist; item; item = item->next) {
         if (SDL_strcmp(item->fname, joystick->hwdata->fname) == 0) {
-            haptic->index = device_index;
             break;
         }
         ++device_index;
     }
+    haptic->index = device_index;
+
     if (device_index >= MAX_HAPTICS) {
         return SDL_SetError("Haptic: Joystick doesn't have Haptic capabilities");
     }
@@ -561,7 +562,8 @@ SDL_SYS_HapticOpenFromJoystick(SDL_Haptic * haptic, SDL_Joystick * joystick)
         return -1;
     }
 
-    haptic->hwdata->fname = item->fname;
+    haptic->hwdata->fname = SDL_strdup( joystick->hwdata->fname );
+
     return 0;
 }
 
@@ -583,6 +585,7 @@ SDL_SYS_HapticClose(SDL_Haptic * haptic)
         close(haptic->hwdata->fd);
 
         /* Free */
+        SDL_free(haptic->hwdata->fname);
         SDL_free(haptic->hwdata);
         haptic->hwdata = NULL;
     }
@@ -606,7 +609,7 @@ SDL_SYS_HapticQuit(void)
         /* Opened and not closed haptics are leaked, this is on purpose.
          * Close your haptic devices after usage. */
         SDL_free(item->fname);
-        item->fname = NULL;
+        SDL_free(item);
     }
 
 #if SDL_USE_LIBUDEV
@@ -687,7 +690,7 @@ SDL_SYS_ToDirection(Uint16 *dest, SDL_HapticDirection * src)
         else if (!src->dir[0])
             *dest = (src->dir[1] >= 0 ? 0x8000 : 0);
         else {
-            float f = atan2(src->dir[1], src->dir[0]);    /* Ideally we'd use fixed point math instead of floats... */
+            float f = SDL_atan2(src->dir[1], src->dir[0]);    /* Ideally we'd use fixed point math instead of floats... */
                     /*
                       atan2 takes the parameters: Y-axis-value and X-axis-value (in that order)
                        - Y-axis-value is the second coordinate (from center to SOUTH)

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -25,8 +25,8 @@
  *  Include file for SDL event handling.
  */
 
-#ifndef _SDL_events_h
-#define _SDL_events_h
+#ifndef SDL_events_h_
+#define SDL_events_h_
 
 #include "SDL_stdinc.h"
 #include "SDL_error.h"
@@ -94,6 +94,9 @@ typedef enum
     SDL_KEYUP,                  /**< Key released */
     SDL_TEXTEDITING,            /**< Keyboard text editing (composition) */
     SDL_TEXTINPUT,              /**< Keyboard text input */
+    SDL_KEYMAPCHANGED,          /**< Keymap changed due to a system event such as an
+                                     input language or keyboard layout change.
+                                */
 
     /* Mouse events */
     SDL_MOUSEMOTION    = 0x400, /**< Mouse moved */
@@ -133,6 +136,9 @@ typedef enum
 
     /* Drag and drop events */
     SDL_DROPFILE        = 0x1000, /**< The system requests a file open */
+    SDL_DROPTEXT,                 /**< text/plain drag-and-drop event */
+    SDL_DROPBEGIN,                /**< A new set of drops is beginning (NULL filename) */
+    SDL_DROPCOMPLETE,             /**< Current set of drops is now complete (NULL filename) */
 
     /* Audio hotplug events */
     SDL_AUDIODEVICEADDED = 0x1100, /**< A new audio device is available */
@@ -425,7 +431,7 @@ typedef struct SDL_MultiGestureEvent
 {
     Uint32 type;        /**< ::SDL_MULTIGESTURE */
     Uint32 timestamp;
-    SDL_TouchID touchId; /**< The touch device index */
+    SDL_TouchID touchId; /**< The touch device id */
     float dTheta;
     float dDist;
     float x;
@@ -453,14 +459,15 @@ typedef struct SDL_DollarGestureEvent
 
 /**
  *  \brief An event used to request a file open by the system (event.drop.*)
- *         This event is disabled by default, you can enable it with SDL_EventState()
- *  \note If you enable this event, you must free the filename in the event.
+ *         This event is enabled by default, you can disable it with SDL_EventState().
+ *  \note If this event is enabled, you must free the filename in the event.
  */
 typedef struct SDL_DropEvent
 {
-    Uint32 type;        /**< ::SDL_DROPFILE */
+    Uint32 type;        /**< ::SDL_DROPBEGIN or ::SDL_DROPFILE or ::SDL_DROPTEXT or ::SDL_DROPCOMPLETE */
     Uint32 timestamp;
-    char *file;         /**< The file name, which should be freed with SDL_free() */
+    char *file;         /**< The file name, which should be freed with SDL_free(), is NULL on begin/complete */
+    Uint32 windowID;    /**< The window that was dropped on, if any */
 } SDL_DropEvent;
 
 
@@ -717,7 +724,7 @@ extern DECLSPEC void SDLCALL SDL_FilterEvents(SDL_EventFilter filter,
 /**
  *  This function allows you to set the state of processing certain events.
  *   - If \c state is set to ::SDL_IGNORE, that event will be automatically
- *     dropped from the event queue and will not event be filtered.
+ *     dropped from the event queue and will not be filtered.
  *   - If \c state is set to ::SDL_ENABLE, that event will be processed
  *     normally.
  *   - If \c state is set to ::SDL_QUERY, SDL_EventState() will return the
@@ -742,6 +749,6 @@ extern DECLSPEC Uint32 SDLCALL SDL_RegisterEvents(int numevents);
 #endif
 #include "close_code.h"
 
-#endif /* _SDL_events_h */
+#endif /* SDL_events_h_ */
 
 /* vi: set ts=4 sw=4 expandtab: */

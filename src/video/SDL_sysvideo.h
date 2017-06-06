@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -20,8 +20,8 @@
 */
 #include "../SDL_internal.h"
 
-#ifndef _SDL_sysvideo_h
-#define _SDL_sysvideo_h
+#ifndef SDL_sysvideo_h_
+#define SDL_sysvideo_h_
 
 #include "SDL_messagebox.h"
 #include "SDL_shape.h"
@@ -86,6 +86,8 @@ struct SDL_Window
 
     SDL_DisplayMode fullscreen_mode;
 
+    float opacity;
+
     float brightness;
     Uint16 *gamma;
     Uint16 *saved_gamma;        /* (just offset into gamma) */
@@ -95,6 +97,7 @@ struct SDL_Window
 
     SDL_bool is_hiding;
     SDL_bool is_destroying;
+    SDL_bool is_dropping;       /* drag/drop in progress, expecting SDL_SendDropComplete(). */
 
     SDL_WindowShaper *shaper;
 
@@ -160,6 +163,11 @@ struct SDL_VideoDevice
      */
     void (*VideoQuit) (_THIS);
 
+    /*
+     * Reinitialize the touch devices -- called if an unknown touch ID occurs.
+     */
+    void (*ResetTouch) (_THIS);
+
     /* * * */
     /*
      * Display functions
@@ -169,6 +177,16 @@ struct SDL_VideoDevice
      * Get the bounds of a display
      */
     int (*GetDisplayBounds) (_THIS, SDL_VideoDisplay * display, SDL_Rect * rect);
+
+    /*
+     * Get the dots/pixels-per-inch of a display
+     */
+    int (*GetDisplayDPI) (_THIS, SDL_VideoDisplay * display, float * ddpi, float * hdpi, float * vdpi);
+
+    /*
+     * Get the usable bounds of a display (bounds minus menubar or whatever)
+     */
+    int (*GetDisplayUsableBounds) (_THIS, SDL_VideoDisplay * display, SDL_Rect * rect);
 
     /*
      * Get a list of the available display modes for a display.
@@ -195,6 +213,10 @@ struct SDL_VideoDevice
     void (*SetWindowSize) (_THIS, SDL_Window * window);
     void (*SetWindowMinimumSize) (_THIS, SDL_Window * window);
     void (*SetWindowMaximumSize) (_THIS, SDL_Window * window);
+    int (*GetWindowBordersSize) (_THIS, SDL_Window * window, int *top, int *left, int *bottom, int *right);
+    int (*SetWindowOpacity) (_THIS, SDL_Window * window, float opacity);
+    int (*SetWindowModalFor) (_THIS, SDL_Window * modal_window, SDL_Window * parent_window);
+    int (*SetWindowInputFocus) (_THIS, SDL_Window * window);
     void (*ShowWindow) (_THIS, SDL_Window * window);
     void (*HideWindow) (_THIS, SDL_Window * window);
     void (*RaiseWindow) (_THIS, SDL_Window * window);
@@ -202,6 +224,7 @@ struct SDL_VideoDevice
     void (*MinimizeWindow) (_THIS, SDL_Window * window);
     void (*RestoreWindow) (_THIS, SDL_Window * window);
     void (*SetWindowBordered) (_THIS, SDL_Window * window, SDL_bool bordered);
+    void (*SetWindowResizable) (_THIS, SDL_Window * window, SDL_bool resizable);
     void (*SetWindowFullscreen) (_THIS, SDL_Window * window, SDL_VideoDisplay * display, SDL_bool fullscreen);
     int (*SetWindowGammaRamp) (_THIS, SDL_Window * window, const Uint16 * ramp);
     int (*GetWindowGammaRamp) (_THIS, SDL_Window * window, Uint16 * ramp);
@@ -234,7 +257,7 @@ struct SDL_VideoDevice
     void (*GL_GetDrawableSize) (_THIS, SDL_Window * window, int *w, int *h);
     int (*GL_SetSwapInterval) (_THIS, int interval);
     int (*GL_GetSwapInterval) (_THIS);
-    void (*GL_SwapWindow) (_THIS, SDL_Window * window);
+    int (*GL_SwapWindow) (_THIS, SDL_Window * window);
     void (*GL_DeleteContext) (_THIS, SDL_GLContext context);
 
     /* * * */
@@ -270,6 +293,7 @@ struct SDL_VideoDevice
 
     /* * * */
     /* Data common to all drivers */
+    SDL_bool is_dummy;
     SDL_bool suspend_screensaver;
     int num_displays;
     SDL_VideoDisplay *displays;
@@ -277,7 +301,7 @@ struct SDL_VideoDevice
     SDL_Window *grabbed_window;
     Uint8 window_magic;
     Uint32 next_object_id;
-    char * clipboard_text;
+    char *clipboard_text;
 
     /* * * */
     /* Data used by the GL drivers */
@@ -348,57 +372,24 @@ typedef struct VideoBootStrap
     SDL_VideoDevice *(*create) (int devindex);
 } VideoBootStrap;
 
-#if SDL_VIDEO_DRIVER_COCOA
+/* Not all of these are available in a given build. Use #ifdefs, etc. */
 extern VideoBootStrap COCOA_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_X11
 extern VideoBootStrap X11_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_MIR
 extern VideoBootStrap MIR_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_DIRECTFB
 extern VideoBootStrap DirectFB_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_WINDOWS
 extern VideoBootStrap WINDOWS_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_WINRT
 extern VideoBootStrap WINRT_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_HAIKU
 extern VideoBootStrap HAIKU_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_PANDORA
 extern VideoBootStrap PND_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_UIKIT
 extern VideoBootStrap UIKIT_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_ANDROID
 extern VideoBootStrap Android_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_PSP
 extern VideoBootStrap PSP_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_RPI
 extern VideoBootStrap RPI_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_DUMMY
 extern VideoBootStrap DUMMY_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_WAYLAND
 extern VideoBootStrap Wayland_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_NACL
 extern VideoBootStrap NACL_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_VIVANTE
 extern VideoBootStrap VIVANTE_bootstrap;
-#endif
-#if SDL_VIDEO_DRIVER_EMSCRIPTEN
 extern VideoBootStrap Emscripten_bootstrap;
-#endif
 
 extern SDL_VideoDevice *SDL_GetVideoDevice(void);
 extern int SDL_AddBasicVideoDisplay(const SDL_DisplayMode * desktop_mode);
@@ -406,6 +397,8 @@ extern int SDL_AddVideoDisplay(const SDL_VideoDisplay * display);
 extern SDL_bool SDL_AddDisplayMode(SDL_VideoDisplay *display, const SDL_DisplayMode * mode);
 extern SDL_VideoDisplay *SDL_GetDisplayForWindow(SDL_Window *window);
 extern void *SDL_GetDisplayDriverData( int displayIndex );
+
+extern void SDL_GL_DeduceMaxSupportedESProfile(int* major, int* minor);
 
 extern int SDL_RecreateWindow(SDL_Window * window, Uint32 flags);
 
@@ -423,6 +416,15 @@ extern SDL_Window * SDL_GetFocusWindow(void);
 
 extern SDL_bool SDL_ShouldAllowTopmost(void);
 
-#endif /* _SDL_sysvideo_h */
+extern float SDL_ComputeDiagonalDPI(int hpix, int vpix, float hinches, float vinches);
+
+extern void SDL_OnApplicationWillTerminate();
+extern void SDL_OnApplicationDidReceiveMemoryWarning();
+extern void SDL_OnApplicationWillResignActive();
+extern void SDL_OnApplicationDidEnterBackground();
+extern void SDL_OnApplicationWillEnterForeground();
+extern void SDL_OnApplicationDidBecomeActive();
+
+#endif /* SDL_sysvideo_h_ */
 
 /* vi: set ts=4 sw=4 expandtab: */

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -35,6 +35,10 @@ SDL_CreateShapedWindow(const char *title,unsigned int x,unsigned int y,unsigned 
     SDL_Window *result = NULL;
     result = SDL_CreateWindow(title,-1000,-1000,w,h,(flags | SDL_WINDOW_BORDERLESS) & (~SDL_WINDOW_FULLSCREEN) & (~SDL_WINDOW_RESIZABLE) /* & (~SDL_WINDOW_SHOWN) */);
     if(result != NULL) {
+        if (SDL_GetVideoDevice()->shape_driver.CreateShaper == NULL) {
+            SDL_DestroyWindow(result);
+            return NULL;
+        }
         result->shaper = SDL_GetVideoDevice()->shape_driver.CreateShaper(result);
         if(result->shaper != NULL) {
             result->shaper->userx = x;
@@ -206,8 +210,14 @@ RecursivelyCalculateShapeTree(SDL_WindowShapeMode mode,SDL_Surface* mask,SDL_Rec
 SDL_ShapeTree*
 SDL_CalculateShapeTree(SDL_WindowShapeMode mode,SDL_Surface* shape)
 {
-    SDL_Rect dimensions = {0,0,shape->w,shape->h};
+    SDL_Rect dimensions;
     SDL_ShapeTree* result = NULL;
+
+    dimensions.x = 0;
+    dimensions.y = 0;
+    dimensions.w = shape->w;
+    dimensions.h = shape->h;
+
     if(SDL_MUSTLOCK(shape))
         SDL_LockSurface(shape);
     result = RecursivelyCalculateShapeTree(mode,shape,dimensions);
@@ -234,10 +244,10 @@ void
 SDL_FreeShapeTree(SDL_ShapeTree** shape_tree)
 {
     if((*shape_tree)->kind == QuadShape) {
-        SDL_FreeShapeTree((SDL_ShapeTree **)&(*shape_tree)->data.children.upleft);
-        SDL_FreeShapeTree((SDL_ShapeTree **)&(*shape_tree)->data.children.upright);
-        SDL_FreeShapeTree((SDL_ShapeTree **)&(*shape_tree)->data.children.downleft);
-        SDL_FreeShapeTree((SDL_ShapeTree **)&(*shape_tree)->data.children.downright);
+        SDL_FreeShapeTree((SDL_ShapeTree **)(char*)&(*shape_tree)->data.children.upleft);
+        SDL_FreeShapeTree((SDL_ShapeTree **)(char*)&(*shape_tree)->data.children.upright);
+        SDL_FreeShapeTree((SDL_ShapeTree **)(char*)&(*shape_tree)->data.children.downleft);
+        SDL_FreeShapeTree((SDL_ShapeTree **)(char*)&(*shape_tree)->data.children.downright);
     }
     SDL_free(*shape_tree);
     *shape_tree = NULL;

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -20,6 +20,14 @@
 */
 
 /* *INDENT-OFF* */
+
+#ifndef SDL_X11_MODULE
+#define SDL_X11_MODULE(modname)
+#endif
+
+#ifndef SDL_X11_SYM
+#define SDL_X11_SYM(rc,fn,params,args,ret)
+#endif
 
 SDL_X11_MODULE(BASEXLIB)
 SDL_X11_SYM(XSizeHints*,XAllocSizeHints,(void),(),return)
@@ -152,6 +160,8 @@ SDL_X11_SYM(unsigned long,_XSetLastRequestRead,(Display* a,xGenericReply* b),(a,
 SDL_X11_SYM(SDL_X11_XSynchronizeRetType,XSynchronize,(Display* a,Bool b),(a,b),return)
 SDL_X11_SYM(SDL_X11_XESetWireToEventRetType,XESetWireToEvent,(Display* a,int b,SDL_X11_XESetWireToEventRetType c),(a,b,c),return)
 SDL_X11_SYM(SDL_X11_XESetEventToWireRetType,XESetEventToWire,(Display* a,int b,SDL_X11_XESetEventToWireRetType c),(a,b,c),return)
+SDL_X11_SYM(void,XRefreshKeyboardMapping,(XMappingEvent *a),(a),)
+SDL_X11_SYM(int,XQueryTree,(Display* a,Window b,Window* c,Window* d,Window** e,unsigned int* f),(a,b,c,d,e,f),return)
 
 #if SDL_VIDEO_DRIVER_X11_SUPPORTS_GENERIC_EVENTS
 SDL_X11_SYM(Bool,XGetEventData,(Display* a,XGenericEventCookie* b),(a,b),return)
@@ -159,11 +169,18 @@ SDL_X11_SYM(void,XFreeEventData,(Display* a,XGenericEventCookie* b),(a,b),)
 #endif
 
 #if SDL_VIDEO_DRIVER_X11_HAS_XKBKEYCODETOKEYSYM
+SDL_X11_SYM(Bool,XkbQueryExtension,(Display* a,int * b,int * c,int * d,int * e, int *f),(a,b,c,d,e,f),return)
 #if NeedWidePrototypes
 SDL_X11_SYM(KeySym,XkbKeycodeToKeysym,(Display* a,unsigned int b,int c,int d),(a,b,c,d),return)
 #else
 SDL_X11_SYM(KeySym,XkbKeycodeToKeysym,(Display* a,KeyCode b,int c,int d),(a,b,c,d),return)
 #endif
+SDL_X11_SYM(Status,XkbGetState,(Display* a,unsigned int b,XkbStatePtr c),(a,b,c),return)
+SDL_X11_SYM(Status,XkbGetUpdatedMap,(Display* a,unsigned int b,XkbDescPtr c),(a,b,c),return)
+SDL_X11_SYM(XkbDescPtr,XkbGetMap,(Display* a,unsigned int b,unsigned int c),(a,b,c),return)
+SDL_X11_SYM(void,XkbFreeClientMap,(XkbDescPtr a,unsigned int b, Bool c),(a,b,c),)
+SDL_X11_SYM(void,XkbFreeKeyboard,(XkbDescPtr a,unsigned int b, Bool c),(a,b,c),)
+SDL_X11_SYM(BOOL,XkbSetDetectableAutoRepeat,(Display* a, BOOL b, BOOL* c),(a,b,c),return)
 #endif
 
 #if NeedWidePrototypes
@@ -185,6 +202,8 @@ SDL_X11_SYM(XIM,XOpenIM,(Display* a,struct _XrmHashBucketRec* b,char* c,char* d)
 SDL_X11_SYM(Status,XCloseIM,(XIM a),(a),return)
 SDL_X11_SYM(void,Xutf8DrawString,(Display *a, Drawable b, XFontSet c, GC d, int e, int f, _Xconst char *g, int h),(a,b,c,d,e,f,g,h),)
 SDL_X11_SYM(int,Xutf8TextExtents,(XFontSet a, _Xconst char*	b, int c, XRectangle* d, XRectangle* e),(a,b,c,d,e),return)
+SDL_X11_SYM(char*,XSetLocaleModifiers,(const char *a),(a),return)
+SDL_X11_SYM(char*,Xutf8ResetIC,(XIC a),(a),return)
 #endif
 
 #ifndef NO_SHARED_MEMORY
@@ -282,6 +301,7 @@ SDL_X11_SYM(Status,XRRSetCrtcConfig,(Display *dpy, XRRScreenResources *resources
 SDL_X11_SYM(Atom*,XRRListOutputProperties,(Display *dpy, RROutput output, int *nprop),(dpy,output,nprop),return)
 SDL_X11_SYM(XRRPropertyInfo*,XRRQueryOutputProperty,(Display *dpy,RROutput output, Atom property),(dpy,output,property),return)
 SDL_X11_SYM(int,XRRGetOutputProperty,(Display *dpy,RROutput output, Atom property, long offset, long length, Bool _delete, Bool pending, Atom req_type, Atom *actual_type, int *actual_format, unsigned long *nitems, unsigned long *bytes_after, unsigned char **prop),(dpy,output,property,offset,length, _delete, pending, req_type, actual_type, actual_format, nitems, bytes_after, prop),return)
+SDL_X11_SYM(RROutput,XRRGetOutputPrimary,(Display *dpy,Window window),(dpy,window),return)
 #endif
 
 /* MIT-SCREEN-SAVER support */
@@ -307,6 +327,9 @@ SDL_X11_SYM(Bool,XF86VidModeQueryVersion,(Display *a,int *b,int *c),(a,b,c),retu
 SDL_X11_SYM(Bool,XF86VidModeSwitchToMode,(Display *a,int b,XF86VidModeModeInfo *c),(a,b,c),return)
 SDL_X11_SYM(Bool,XF86VidModeLockModeSwitch,(Display *a,int b,int c),(a,b,c),return)
 #endif
+
+#undef SDL_X11_MODULE
+#undef SDL_X11_SYM
 
 /* *INDENT-ON* */
 

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -79,7 +79,7 @@ void SDL_DestroySemaphore(SDL_sem *sem)
 int SDL_SemWaitTimeout(SDL_sem *sem, Uint32 timeout)
 {
     Uint32 *pTimeout;
-       unsigned int res;
+    int res;
 
     if (sem == NULL) {
         SDL_SetError("Passed a NULL sem");
@@ -108,7 +108,7 @@ int SDL_SemWaitTimeout(SDL_sem *sem, Uint32 timeout)
                case SCE_KERNEL_ERROR_WAIT_TIMEOUT:
                        return SDL_MUTEX_TIMEDOUT;
                default:
-                       return SDL_SetError("WaitForSingleObject() failed");
+                       return SDL_SetError("sceKernelWaitSema() failed");
     }
 }
 

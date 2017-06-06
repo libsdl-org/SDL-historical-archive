@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -236,7 +236,7 @@ WIN_WarpMouse(SDL_Window * window, int x, int y)
     SetCursorPos(pt.x, pt.y);
 }
 
-static void
+static int
 WIN_WarpMouseGlobal(int x, int y)
 {
     POINT pt;
@@ -244,6 +244,7 @@ WIN_WarpMouseGlobal(int x, int y)
     pt.x = x;
     pt.y = y;
     SetCursorPos(pt.x, pt.y);
+    return 0;
 }
 
 static int
@@ -310,13 +311,6 @@ WIN_InitMouse(_THIS)
 void
 WIN_QuitMouse(_THIS)
 {
-    SDL_Mouse *mouse = SDL_GetMouse();
-    if ( mouse->def_cursor ) {
-        SDL_free(mouse->def_cursor);
-        mouse->def_cursor = NULL;
-        mouse->cur_cursor = NULL;
-    }
-
     if (rawInputEnableCount) {  /* force RAWINPUT off here. */
         rawInputEnableCount = 1;
         ToggleRawInput(SDL_FALSE);

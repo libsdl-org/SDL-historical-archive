@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2015 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2017 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -46,13 +46,19 @@
 #include "SDL_opengles2.h"
 #endif /* SDL_VIDEO_OPENGL_ES2 && !SDL_VIDEO_OPENGL */
 
+#if !SDL_VIDEO_OPENGL
 #ifndef GL_CONTEXT_RELEASE_BEHAVIOR_KHR
 #define GL_CONTEXT_RELEASE_BEHAVIOR_KHR 0x82FB
+#endif
 #endif
 
 /* On Windows, windows.h defines CreateWindow */
 #ifdef CreateWindow
 #undef CreateWindow
+#endif
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
 #endif
 
 /* Available video drivers */
@@ -166,6 +172,11 @@ ShouldUseTextureFramebuffer()
         return SDL_TRUE;
     }
 
+    /* If this is the dummy driver there is no texture support */
+    if (_this->is_dummy) {
+        return SDL_FALSE;
+    }
+
     /* If the user has specified a software renderer we can't use a
        texture framebuffer, or renderer creation will go recursive.
      */
@@ -177,7 +188,7 @@ ShouldUseTextureFramebuffer()
     /* See if the user or application wants a specific behavior */
     hint = SDL_GetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION);
     if (hint) {
-        if (*hint == '0') {
+        if (*hint == '0' || SDL_strcasecmp(hint, "false") == 0) {
             return SDL_FALSE;
         } else {
             return SDL_TRUE;
@@ -191,7 +202,7 @@ ShouldUseTextureFramebuffer()
     return SDL_FALSE;
 
 #elif defined(__MACOSX__)
-    /* Mac OS X uses OpenGL as the native fast path */
+    /* Mac OS X uses OpenGL as the native fast path (for cocoa and X11) */
     return SDL_TRUE;
 
 #elif defined(__LINUX__)
@@ -254,6 +265,8 @@ SDL_CreateWindowTexture(SDL_VideoDevice *unused, SDL_Window * window, Uint32 * f
 
         /* Check to see if there's a specific driver requested */
         if (hint && *hint != '0' && *hint != '1' &&
+            SDL_strcasecmp(hint, "true") != 0 &&
+            SDL_strcasecmp(hint, "false") != 0 &&
             SDL_strcasecmp(hint, "software") != 0) {
             for (i = 0; i < SDL_GetNumRenderDrivers(); ++i) {
                 SDL_RendererInfo info;
@@ -330,9 +343,14 @@ SDL_CreateWindowTexture(SDL_VideoDevice *unused, SDL_Window * window, Uint32 * f
     /* Create framebuffer data */
     data->bytes_per_pixel = SDL_BYTESPERPIXEL(*format);
     data->pitch = (((window->w * data->bytes_per_pixel) + 3) & ~3);
-    data->pixels = SDL_malloc(window->h * data->pitch);
-    if (!data->pixels) {
-        return SDL_OutOfMemory();
+
+    {
+        /* Make static analysis happy about potential malloc(0) calls. */
+        const size_t allocsize = window->h * data->pitch;
+        data->pixels = SDL_malloc((allocsize > 0) ? allocsize : 1);
+        if (!data->pixels) {
+            return SDL_OutOfMemory();
+        }
     }
 
     *pixels = data->pixels;
@@ -443,10 +461,8 @@ int
 SDL_VideoInit(const char *driver_name)
 {
     SDL_VideoDevice *video;
-    const char *hint;
     int index;
     int i;
-    SDL_bool allow_screensaver;
 
     /* Check to make sure we don't overwrite '_this' */
     if (_this != NULL) {
@@ -534,13 +550,7 @@ SDL_VideoInit(const char *driver_name)
        joystick, or passively watching a movie. Things that use SDL but
        function more like a normal desktop app should explicitly reenable the
        screensaver. */
-    hint = SDL_GetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER);
-    if (hint) {
-        allow_screensaver = SDL_atoi(hint) ? SDL_TRUE : SDL_FALSE;
-    } else {
-        allow_screensaver = SDL_FALSE;
-    }
-    if (!allow_screensaver) {
+    if (!SDL_GetHintBoolean(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, SDL_FALSE)) {
         SDL_DisableScreenSaver();
     }
 
@@ -684,7 +694,46 @@ SDL_GetDisplayBounds(int displayIndex, SDL_Rect * rect)
         rect->w = display->current_mode.w;
         rect->h = display->current_mode.h;
     }
-    return 0;
+    return 0;  /* !!! FIXME: should this be an error if (rect==NULL) ? */
+}
+
+int SDL_GetDisplayUsableBounds(int displayIndex, SDL_Rect * rect)
+{
+    CHECK_DISPLAY_INDEX(displayIndex, -1);
+
+    if (rect) {
+        SDL_VideoDisplay *display = &_this->displays[displayIndex];
+
+        if (_this->GetDisplayUsableBounds) {
+            if (_this->GetDisplayUsableBounds(_this, display, rect) == 0) {
+                return 0;
+            }
+        }
+
+        /* Oh well, just give the entire display bounds. */
+        return SDL_GetDisplayBounds(displayIndex, rect);
+    }
+    return 0;  /* !!! FIXME: should this be an error if (rect==NULL) ? */
+}
+
+int
+SDL_GetDisplayDPI(int displayIndex, float * ddpi, float * hdpi, float * vdpi)
+{
+	SDL_VideoDisplay *display;
+
+    CHECK_DISPLAY_INDEX(displayIndex, -1);
+
+    display = &_this->displays[displayIndex];
+
+	if (_this->GetDisplayDPI) {
+		if (_this->GetDisplayDPI(_this, display, ddpi, hdpi, vdpi) == 0) {
+			return 0;
+		}
+    } else {
+        return SDL_Unsupported();
+    }
+
+	return -1;
 }
 
 SDL_bool
@@ -1107,6 +1156,10 @@ SDL_RestoreMousePosition(SDL_Window *window)
     }
 }
 
+#if __WINRT__
+extern Uint32 WINRT_DetectWindowFlags(SDL_Window * window);
+#endif
+
 static int
 SDL_UpdateFullscreenMode(SDL_Window * window, SDL_bool fullscreen)
 {
@@ -1116,12 +1169,63 @@ SDL_UpdateFullscreenMode(SDL_Window * window, SDL_bool fullscreen)
     CHECK_WINDOW_MAGIC(window,-1);
 
     /* if we are in the process of hiding don't go back to fullscreen */
-    if ( window->is_hiding && fullscreen )
+    if (window->is_hiding && fullscreen) {
         return 0;
-    
+    }
+
 #ifdef __MACOSX__
-    if (Cocoa_SetWindowFullscreenSpace(window, fullscreen)) {
-        window->last_fullscreen_flags = window->flags;
+    /* if the window is going away and no resolution change is necessary,
+       do nothing, or else we may trigger an ugly double-transition
+     */
+    if (SDL_strcmp(_this->name, "cocoa") == 0) {  /* don't do this for X11, etc */
+        if (window->is_destroying && (window->last_fullscreen_flags & FULLSCREEN_MASK) == SDL_WINDOW_FULLSCREEN_DESKTOP)
+            return 0;
+    
+        if (!_this->is_dummy) {
+            /* If we're switching between a fullscreen Space and "normal" fullscreen, we need to get back to normal first. */
+            if (fullscreen && ((window->last_fullscreen_flags & FULLSCREEN_MASK) == SDL_WINDOW_FULLSCREEN_DESKTOP) && ((window->flags & FULLSCREEN_MASK) == SDL_WINDOW_FULLSCREEN)) {
+                if (!Cocoa_SetWindowFullscreenSpace(window, SDL_FALSE)) {
+                    return -1;
+                }
+            } else if (fullscreen && ((window->last_fullscreen_flags & FULLSCREEN_MASK) == SDL_WINDOW_FULLSCREEN) && ((window->flags & FULLSCREEN_MASK) == SDL_WINDOW_FULLSCREEN_DESKTOP)) {
+                display = SDL_GetDisplayForWindow(window);
+                SDL_SetDisplayModeForDisplay(display, NULL);
+                if (_this->SetWindowFullscreen) {
+                    _this->SetWindowFullscreen(_this, window, display, SDL_FALSE);
+                }
+            }
+
+            if (Cocoa_SetWindowFullscreenSpace(window, fullscreen)) {
+                if (Cocoa_IsWindowInFullscreenSpace(window) != fullscreen) {
+                    return -1;
+                }
+                window->last_fullscreen_flags = window->flags;
+                return 0;
+            }
+        }
+    }
+#elif __WINRT__ && (NTDDI_VERSION < NTDDI_WIN10)
+    /* HACK: WinRT 8.x apps can't choose whether or not they are fullscreen
+       or not.  The user can choose this, via OS-provided UI, but this can't
+       be set programmatically.
+
+       Just look at what SDL's WinRT video backend code detected with regards
+       to fullscreen (being active, or not), and figure out a return/error code
+       from that.
+    */
+    if (fullscreen == !(WINRT_DetectWindowFlags(window) & FULLSCREEN_MASK)) {
+        /* Uh oh, either:
+            1. fullscreen was requested, and we're already windowed
+            2. windowed-mode was requested, and we're already fullscreen
+
+            WinRT 8.x can't resolve either programmatically, so we're
+            giving up.
+        */
+        return -1;
+    } else {
+        /* Whatever was requested, fullscreen or windowed mode, is already
+            in-place.
+        */
         return 0;
     }
 #endif
@@ -1217,16 +1321,11 @@ SDL_UpdateFullscreenMode(SDL_Window * window, SDL_bool fullscreen)
 }
 
 #define CREATE_FLAGS \
-    (SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI)
+    (SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_SKIP_TASKBAR | SDL_WINDOW_POPUP_MENU | SDL_WINDOW_UTILITY | SDL_WINDOW_TOOLTIP | SDL_WINDOW_VULKAN )
 
 static void
 SDL_FinishWindowCreation(SDL_Window *window, Uint32 flags)
 {
-    window->windowed.x = window->x;
-    window->windowed.y = window->y;
-    window->windowed.w = window->w;
-    window->windowed.h = window->h;
-
     if (flags & SDL_WINDOW_MAXIMIZED) {
         SDL_MaximizeWindow(window);
     }
@@ -1248,13 +1347,17 @@ SDL_Window *
 SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
 {
     SDL_Window *window;
-    const char *hint;
 
     if (!_this) {
         /* Initialize the video system if needed */
         if (SDL_VideoInit(NULL) < 0) {
             return NULL;
         }
+    }
+
+    if ((((flags & SDL_WINDOW_UTILITY) != 0) + ((flags & SDL_WINDOW_TOOLTIP) != 0) + ((flags & SDL_WINDOW_POPUP_MENU) != 0)) > 1) {
+        SDL_SetError("Conflicting window flags specified");
+        return NULL;
     }
 
     /* Some platforms can't create zero-sized windows */
@@ -1273,7 +1376,9 @@ SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
 
     /* Some platforms have OpenGL enabled by default */
 #if (SDL_VIDEO_OPENGL && __MACOSX__) || __IPHONEOS__ || __ANDROID__ || __NACL__
-    flags |= SDL_WINDOW_OPENGL;
+    if (!_this->is_dummy) {
+        flags |= SDL_WINDOW_OPENGL;
+    }
 #endif
     if (flags & SDL_WINDOW_OPENGL) {
         if (!_this->GL_CreateContext) {
@@ -1289,8 +1394,7 @@ SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
      * SDL_WINDOW_ALLOW_HIGHDPI flag.
      */
     if (flags & SDL_WINDOW_ALLOW_HIGHDPI) {
-        hint = SDL_GetHint(SDL_HINT_VIDEO_HIGHDPI_DISABLED);
-        if (hint && SDL_atoi(hint) > 0) {
+        if (SDL_GetHintBoolean(SDL_HINT_VIDEO_HIGHDPI_DISABLED, SDL_FALSE)) {
             flags &= ~SDL_WINDOW_ALLOW_HIGHDPI;
         }
     }
@@ -1321,8 +1425,28 @@ SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
             window->y = bounds.y + (bounds.h - h) / 2;
         }
     }
+    window->windowed.x = window->x;
+    window->windowed.y = window->y;
+    window->windowed.w = window->w;
+    window->windowed.h = window->h;
+
+    if (flags & SDL_WINDOW_FULLSCREEN) {
+        SDL_VideoDisplay *display = SDL_GetDisplayForWindow(window);
+        int displayIndex;
+        SDL_Rect bounds;
+
+        displayIndex = SDL_GetIndexOfDisplay(display);
+        SDL_GetDisplayBounds(displayIndex, &bounds);
+
+        window->x = bounds.x;
+        window->y = bounds.y;
+        window->w = bounds.w;
+        window->h = bounds.h;
+    }
+
     window->flags = ((flags & CREATE_FLAGS) | SDL_WINDOW_HIDDEN);
     window->last_fullscreen_flags = window->flags;
+    window->opacity = 1.0f;
     window->brightness = 1.0f;
     window->next = _this->windows;
     window->is_destroying = SDL_FALSE;
@@ -1336,6 +1460,18 @@ SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
         SDL_DestroyWindow(window);
         return NULL;
     }
+
+#if __WINRT__ && (NTDDI_VERSION < NTDDI_WIN10)
+    /* HACK: WinRT 8.x apps can't choose whether or not they are fullscreen
+       or not.  The user can choose this, via OS-provided UI, but this can't
+       be set programmatically.
+
+       Just look at what SDL's WinRT video backend code detected with regards
+       to fullscreen (being active, or not), and figure out a return/error code
+       from that.
+    */
+    flags = window->flags;
+#endif
 
     if (title) {
         SDL_SetWindowTitle(window, title);
@@ -1371,6 +1507,7 @@ SDL_CreateWindowFrom(const void *data)
     window->flags = SDL_WINDOW_FOREIGN;
     window->last_fullscreen_flags = window->flags;
     window->is_destroying = SDL_FALSE;
+    window->opacity = 1.0f;
     window->brightness = 1.0f;
     window->next = _this->windows;
     if (_this->windows) {
@@ -1388,8 +1525,6 @@ SDL_CreateWindowFrom(const void *data)
 int
 SDL_RecreateWindow(SDL_Window * window, Uint32 flags)
 {
-    char *title = window->title;
-    SDL_Surface *icon = window->icon;
     SDL_bool loaded_opengl = SDL_FALSE;
 
     if ((flags & SDL_WINDOW_OPENGL) && !_this->GL_CreateContext) {
@@ -1410,6 +1545,7 @@ SDL_RecreateWindow(SDL_Window * window, Uint32 flags)
     if (window->surface) {
         window->surface->flags &= ~SDL_DONTFREE;
         SDL_FreeSurface(window->surface);
+        window->surface = NULL;
     }
     if (_this->DestroyWindowFramebuffer) {
         _this->DestroyWindowFramebuffer(_this, window);
@@ -1429,8 +1565,6 @@ SDL_RecreateWindow(SDL_Window * window, Uint32 flags)
         }
     }
 
-    window->title = NULL;
-    window->icon = NULL;
     window->flags = ((flags & CREATE_FLAGS) | SDL_WINDOW_HIDDEN);
     window->last_fullscreen_flags = window->flags;
     window->is_destroying = SDL_FALSE;
@@ -1444,17 +1578,17 @@ SDL_RecreateWindow(SDL_Window * window, Uint32 flags)
             return -1;
         }
     }
+
     if (flags & SDL_WINDOW_FOREIGN) {
         window->flags |= SDL_WINDOW_FOREIGN;
     }
 
-    if (title) {
-        SDL_SetWindowTitle(window, title);
-        SDL_free(title);
+    if (_this->SetWindowTitle && window->title) {
+        _this->SetWindowTitle(_this, window);
     }
-    if (icon) {
-        SDL_SetWindowIcon(window, icon);
-        SDL_FreeSurface(icon);
+
+    if (_this->SetWindowIcon && window->icon) {
+        _this->SetWindowIcon(_this, window, window->icon);
     }
 
     if (window->hit_test) {
@@ -1621,7 +1755,7 @@ SDL_SetWindowPosition(SDL_Window * window, int x, int y)
     if (SDL_WINDOWPOS_ISCENTERED(x) || SDL_WINDOWPOS_ISCENTERED(y)) {
         int displayIndex = (x & 0xFFFF);
         SDL_Rect bounds;
-        if (displayIndex > _this->num_displays) {
+        if (displayIndex >= _this->num_displays) {
             displayIndex = 0;
         }
 
@@ -1665,11 +1799,30 @@ SDL_GetWindowPosition(SDL_Window * window, int *x, int *y)
 
     /* Fullscreen windows are always at their display's origin */
     if (window->flags & SDL_WINDOW_FULLSCREEN) {
+        int displayIndex;
+        
         if (x) {
             *x = 0;
         }
         if (y) {
             *y = 0;
+        }
+
+        /* Find the window's monitor and update to the
+           monitor offset. */
+        displayIndex = SDL_GetWindowDisplayIndex(window);
+        if (displayIndex >= 0) {
+            SDL_Rect bounds;
+
+            SDL_zero(bounds);
+
+            SDL_GetDisplayBounds(displayIndex, &bounds);
+            if (x) {
+                *x = bounds.x;
+            }
+            if (y) {
+                *y = bounds.y;
+            }
         }
     } else {
         if (x) {
@@ -1695,6 +1848,24 @@ SDL_SetWindowBordered(SDL_Window * window, SDL_bool bordered)
                 window->flags |= SDL_WINDOW_BORDERLESS;
             }
             _this->SetWindowBordered(_this, window, (SDL_bool) want);
+        }
+    }
+}
+
+void
+SDL_SetWindowResizable(SDL_Window * window, SDL_bool resizable)
+{
+    CHECK_WINDOW_MAGIC(window,);
+    if (!(window->flags & SDL_WINDOW_FULLSCREEN)) {
+        const int want = (resizable != SDL_FALSE);  /* normalize the flag. */
+        const int have = ((window->flags & SDL_WINDOW_RESIZABLE) != 0);
+        if ((want != have) && (_this->SetWindowResizable)) {
+            if (want) {
+                window->flags |= SDL_WINDOW_RESIZABLE;
+            } else {
+                window->flags &= ~SDL_WINDOW_RESIZABLE;
+            }
+            _this->SetWindowResizable(_this, window, (SDL_bool) want);
         }
     }
 }
@@ -1763,6 +1934,28 @@ SDL_GetWindowSize(SDL_Window * window, int *w, int *h)
     }
 }
 
+int
+SDL_GetWindowBordersSize(SDL_Window * window, int *top, int *left, int *bottom, int *right)
+{
+    int dummy = 0;
+
+    if (!top) { top = &dummy; }
+    if (!left) { left = &dummy; }
+    if (!right) { right = &dummy; }
+    if (!bottom) { bottom = &dummy; }
+
+    /* Always initialize, so applications don't have to care */
+    *top = *left = *bottom = *right = 0;
+
+    CHECK_WINDOW_MAGIC(window, -1);
+
+    if (!_this->GetWindowBordersSize) {
+        return SDL_Unsupported();
+    }
+
+    return _this->GetWindowBordersSize(_this, window, top, left, bottom, right);
+}
+
 void
 SDL_SetWindowMinimumSize(SDL_Window * window, int min_w, int min_h)
 {
@@ -1776,9 +1969,16 @@ SDL_SetWindowMinimumSize(SDL_Window * window, int min_w, int min_h)
         return;
     }
 
+    if ((window->max_w && min_w >= window->max_w) ||
+        (window->max_h && min_h >= window->max_h)) {
+        SDL_SetError("SDL_SetWindowMinimumSize(): Tried to set minimum size larger than maximum size");
+        return;
+    }
+
+    window->min_w = min_w;
+    window->min_h = min_h;
+
     if (!(window->flags & SDL_WINDOW_FULLSCREEN)) {
-        window->min_w = min_w;
-        window->min_h = min_h;
         if (_this->SetWindowMinimumSize) {
             _this->SetWindowMinimumSize(_this, window);
         }
@@ -1812,9 +2012,15 @@ SDL_SetWindowMaximumSize(SDL_Window * window, int max_w, int max_h)
         return;
     }
 
+    if (max_w <= window->min_w || max_h <= window->min_h) {
+        SDL_SetError("SDL_SetWindowMaximumSize(): Tried to set maximum size smaller than minimum size");
+        return;
+    }
+
+    window->max_w = max_w;
+    window->max_h = max_h;
+
     if (!(window->flags & SDL_WINDOW_FULLSCREEN)) {
-        window->max_w = max_w;
-        window->max_h = max_h;
         if (_this->SetWindowMaximumSize) {
             _this->SetWindowMaximumSize(_this, window);
         }
@@ -1931,6 +2137,7 @@ SDL_RestoreWindow(SDL_Window * window)
 int
 SDL_SetWindowFullscreen(SDL_Window * window, Uint32 flags)
 {
+    Uint32 oldflags;
     CHECK_WINDOW_MAGIC(window, -1);
 
     flags &= FULLSCREEN_MASK;
@@ -1940,10 +2147,17 @@ SDL_SetWindowFullscreen(SDL_Window * window, Uint32 flags)
     }
 
     /* clear the previous flags and OR in the new ones */
+    oldflags = window->flags & FULLSCREEN_MASK;
     window->flags &= ~FULLSCREEN_MASK;
     window->flags |= flags;
 
-    return SDL_UpdateFullscreenMode(window, FULLSCREEN_VISIBLE(window));
+    if (SDL_UpdateFullscreenMode(window, FULLSCREEN_VISIBLE(window)) == 0) {
+        return 0;
+    }
+    
+    window->flags &= ~FULLSCREEN_MASK;
+    window->flags |= oldflags;
+    return -1;
 }
 
 static SDL_Surface *
@@ -2039,6 +2253,68 @@ SDL_GetWindowBrightness(SDL_Window * window)
 
     return window->brightness;
 }
+
+int
+SDL_SetWindowOpacity(SDL_Window * window, float opacity)
+{
+    int retval;
+    CHECK_WINDOW_MAGIC(window, -1);
+
+    if (!_this->SetWindowOpacity) {
+        return SDL_Unsupported();
+    }
+
+    if (opacity < 0.0f) {
+        opacity = 0.0f;
+    } else if (opacity > 1.0f) {
+        opacity = 1.0f;
+    }
+
+    retval = _this->SetWindowOpacity(_this, window, opacity);
+    if (retval == 0) {
+        window->opacity = opacity;
+    }
+
+    return retval;
+}
+
+int
+SDL_GetWindowOpacity(SDL_Window * window, float * out_opacity)
+{
+    CHECK_WINDOW_MAGIC(window, -1);
+
+    if (out_opacity) {
+        *out_opacity = window->opacity;
+    }
+
+    return 0;
+}
+
+int
+SDL_SetWindowModalFor(SDL_Window * modal_window, SDL_Window * parent_window)
+{
+    CHECK_WINDOW_MAGIC(modal_window, -1);
+    CHECK_WINDOW_MAGIC(parent_window, -1);
+
+    if (!_this->SetWindowModalFor) {
+        return SDL_Unsupported();
+    }
+    
+    return _this->SetWindowModalFor(_this, modal_window, parent_window);
+}
+
+int 
+SDL_SetWindowInputFocus(SDL_Window * window)
+{
+    CHECK_WINDOW_MAGIC(window, -1);
+
+    if (!_this->SetWindowInputFocus) {
+        return SDL_Unsupported();
+    }
+    
+    return _this->SetWindowInputFocus(_this, window);
+}
+
 
 int
 SDL_SetWindowGammaRamp(SDL_Window * window, const Uint16 * red,
@@ -2255,28 +2531,19 @@ SDL_OnWindowFocusGained(SDL_Window * window)
 static SDL_bool
 ShouldMinimizeOnFocusLoss(SDL_Window * window)
 {
-    const char *hint;
-
     if (!(window->flags & SDL_WINDOW_FULLSCREEN) || window->is_destroying) {
         return SDL_FALSE;
     }
 
 #ifdef __MACOSX__
-    if (Cocoa_IsWindowInFullscreenSpace(window)) {
-        return SDL_FALSE;
+    if (SDL_strcmp(_this->name, "cocoa") == 0) {  /* don't do this for X11, etc */
+        if (Cocoa_IsWindowInFullscreenSpace(window)) {
+            return SDL_FALSE;
+        }
     }
 #endif
 
-    hint = SDL_GetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS);
-    if (hint) {
-        if (*hint == '0') {
-            return SDL_FALSE;
-        } else {
-            return SDL_TRUE;
-        }
-    }
-
-    return SDL_TRUE;
+    return SDL_GetHintBoolean(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, SDL_TRUE);
 }
 
 void
@@ -2542,11 +2809,13 @@ SDL_GL_UnloadLibrary(void)
     }
 }
 
+#if SDL_VIDEO_OPENGL || SDL_VIDEO_OPENGL_ES || SDL_VIDEO_OPENGL_ES2
 static SDL_INLINE SDL_bool
 isAtLeastGL3(const char *verstr)
 {
     return (verstr && (SDL_atoi(verstr) >= 3));
 }
+#endif
 
 SDL_bool
 SDL_GL_ExtensionSupported(const char *extension)
@@ -2629,6 +2898,35 @@ SDL_GL_ExtensionSupported(const char *extension)
     return SDL_FALSE;
 #else
     return SDL_FALSE;
+#endif
+}
+
+/* Deduce supported ES profile versions from the supported
+   ARB_ES*_compatibility extensions. There is no direct query.
+   
+   This is normally only called when the OpenGL driver supports
+   {GLX,WGL}_EXT_create_context_es2_profile.
+ */
+void
+SDL_GL_DeduceMaxSupportedESProfile(int* major, int* minor)
+{
+#if SDL_VIDEO_OPENGL || SDL_VIDEO_OPENGL_ES || SDL_VIDEO_OPENGL_ES2
+	/* XXX This is fragile; it will break in the event of release of
+	 * new versions of OpenGL ES.
+     */
+    if (SDL_GL_ExtensionSupported("GL_ARB_ES3_2_compatibility")) {
+        *major = 3;
+        *minor = 2;
+    } else if (SDL_GL_ExtensionSupported("GL_ARB_ES3_1_compatibility")) {
+        *major = 3;
+        *minor = 1;
+    } else if (SDL_GL_ExtensionSupported("GL_ARB_ES3_compatibility")) {
+        *major = 3;
+        *minor = 0;
+    } else {
+        *major = 2;
+        *minor = 0;
+    }
 #endif
 }
 
@@ -2810,17 +3108,7 @@ SDL_GL_GetAttribute(SDL_GLattr attr, int *value)
     void (APIENTRY *glGetFramebufferAttachmentParameterivFunc) (GLenum target, GLenum attachment, GLenum pname, GLint* params);
     GLenum attachment = GL_BACK_LEFT;
     GLenum attachmentattrib = 0;
-
-    glGetStringFunc = SDL_GL_GetProcAddress("glGetString");
-    if (!glGetStringFunc) {
-        return SDL_SetError("Failed getting OpenGL glGetString entry point");
-    }
 #endif
-
-    glGetErrorFunc = SDL_GL_GetProcAddress("glGetError");
-    if (!glGetErrorFunc) {
-        return SDL_SetError("Failed getting OpenGL glGetError entry point");
-    }
 
     /* Clear value in any case */
     *value = 0;
@@ -2992,6 +3280,11 @@ SDL_GL_GetAttribute(SDL_GLattr attr, int *value)
     }
 
 #if SDL_VIDEO_OPENGL
+    glGetStringFunc = SDL_GL_GetProcAddress("glGetString");
+    if (!glGetStringFunc) {
+        return SDL_SetError("Failed getting OpenGL glGetString entry point");
+    }
+
     if (attachmentattrib && isAtLeastGL3((const char *) glGetStringFunc(GL_VERSION))) {
         glGetFramebufferAttachmentParameterivFunc = SDL_GL_GetProcAddress("glGetFramebufferAttachmentParameteriv");
 
@@ -3010,6 +3303,11 @@ SDL_GL_GetAttribute(SDL_GLattr attr, int *value)
         } else {
             return SDL_SetError("Failed getting OpenGL glGetIntegerv entry point");
         }
+    }
+
+    glGetErrorFunc = SDL_GL_GetProcAddress("glGetError");
+    if (!glGetErrorFunc) {
+        return SDL_SetError("Failed getting OpenGL glGetError entry point");
     }
 
     error = glGetErrorFunc();
@@ -3382,8 +3680,9 @@ SDL_IsScreenKeyboardShown(SDL_Window *window)
 #include "x11/SDL_x11messagebox.h"
 #endif
 
-// This function will be unused if none of the above video drivers are present.
-SDL_UNUSED static SDL_bool SDL_MessageboxValidForDriver(const SDL_MessageBoxData *messageboxdata, SDL_SYSWM_TYPE drivertype)
+
+#if SDL_VIDEO_DRIVER_WINDOWS || SDL_VIDEO_DRIVER_WINRT || SDL_VIDEO_DRIVER_COCOA || SDL_VIDEO_DRIVER_UIKIT || SDL_VIDEO_DRIVER_X11
+static SDL_bool SDL_MessageboxValidForDriver(const SDL_MessageBoxData *messageboxdata, SDL_SYSWM_TYPE drivertype)
 {
     SDL_SysWMinfo info;
     SDL_Window *window = messageboxdata->window;
@@ -3399,6 +3698,7 @@ SDL_UNUSED static SDL_bool SDL_MessageboxValidForDriver(const SDL_MessageBoxData
         return (info.subsystem == drivertype);
     }
 }
+#endif
 
 int
 SDL_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonid)
@@ -3492,6 +3792,16 @@ SDL_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonid)
 int
 SDL_ShowSimpleMessageBox(Uint32 flags, const char *title, const char *message, SDL_Window *window)
 {
+#ifdef __EMSCRIPTEN__
+    /* !!! FIXME: propose a browser API for this, get this #ifdef out of here? */
+    /* Web browsers don't (currently) have an API for a custom message box
+       that can block, but for the most common case (SDL_ShowSimpleMessageBox),
+       we can use the standard Javascript alert() function. */
+    EM_ASM_({
+        alert(UTF8ToString($0) + "\n\n" + UTF8ToString($1));
+    }, title, message);
+    return 0;
+#else
     SDL_MessageBoxData data;
     SDL_MessageBoxButtonData button;
 
@@ -3509,20 +3819,13 @@ SDL_ShowSimpleMessageBox(Uint32 flags, const char *title, const char *message, S
     button.text = "OK";
 
     return SDL_ShowMessageBox(&data, NULL);
+#endif
 }
 
 SDL_bool
 SDL_ShouldAllowTopmost(void)
 {
-    const char *hint = SDL_GetHint(SDL_HINT_ALLOW_TOPMOST);
-    if (hint) {
-        if (*hint == '0') {
-            return SDL_FALSE;
-        } else {
-            return SDL_TRUE;
-        }
-    }
-    return SDL_TRUE;
+    return SDL_GetHintBoolean(SDL_HINT_ALLOW_TOPMOST, SDL_TRUE);
 }
 
 int
@@ -3540,6 +3843,66 @@ SDL_SetWindowHitTest(SDL_Window * window, SDL_HitTest callback, void *userdata)
     window->hit_test_data = userdata;
 
     return 0;
+}
+
+float
+SDL_ComputeDiagonalDPI(int hpix, int vpix, float hinches, float vinches)
+{
+	float den2 = hinches * hinches + vinches * vinches;
+	if (den2 <= 0.0f) {
+		return 0.0f;
+	}
+		
+	return (float)(SDL_sqrt((double)hpix * (double)hpix + (double)vpix * (double)vpix) /
+				   SDL_sqrt((double)den2));
+}
+
+/*
+ * Functions used by iOS application delegates
+ */
+void SDL_OnApplicationWillTerminate()
+{
+    SDL_SendAppEvent(SDL_APP_TERMINATING);
+}
+
+void SDL_OnApplicationDidReceiveMemoryWarning()
+{
+    SDL_SendAppEvent(SDL_APP_LOWMEMORY);
+}
+
+void SDL_OnApplicationWillResignActive()
+{
+    if (_this) {
+        SDL_Window *window;
+        for (window = _this->windows; window != NULL; window = window->next) {
+            SDL_SendWindowEvent(window, SDL_WINDOWEVENT_FOCUS_LOST, 0, 0);
+            SDL_SendWindowEvent(window, SDL_WINDOWEVENT_MINIMIZED, 0, 0);
+        }
+    }
+    SDL_SendAppEvent(SDL_APP_WILLENTERBACKGROUND);
+}
+
+void SDL_OnApplicationDidEnterBackground()
+{
+    SDL_SendAppEvent(SDL_APP_DIDENTERBACKGROUND);
+}
+
+void SDL_OnApplicationWillEnterForeground()
+{
+    SDL_SendAppEvent(SDL_APP_WILLENTERFOREGROUND);
+}
+
+void SDL_OnApplicationDidBecomeActive()
+{
+    SDL_SendAppEvent(SDL_APP_DIDENTERFOREGROUND);
+
+    if (_this) {
+        SDL_Window *window;
+        for (window = _this->windows; window != NULL; window = window->next) {
+            SDL_SendWindowEvent(window, SDL_WINDOWEVENT_FOCUS_GAINED, 0, 0);
+            SDL_SendWindowEvent(window, SDL_WINDOWEVENT_RESTORED, 0, 0);
+        }
+    }
 }
 
 /* vi: set ts=4 sw=4 expandtab: */
