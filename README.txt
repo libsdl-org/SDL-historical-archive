@@ -1,4 +1,15 @@
 
+THIS IS A READ-ONLY SNAPSHOT OF SDL'S FINAL MERCURIAL REPOSITORY.
+NO DEVELOPMENT HAPPENS HERE, THIS IS ONLY FOR ARCHIVAL PURPOSES.
+
+IF YOU WANT THE ACTIVELY DEVELOPED REPOSITORY, IT IS CURRENTLY AT:
+
+https://github.com/libsdl-org/SDL
+
+
+
+
+
                          Simple DirectMedia Layer
 
                                   (SDL)
